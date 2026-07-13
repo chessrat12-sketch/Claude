@@ -8,6 +8,7 @@ laws, or alliances — those are meant to emerge from agent behaviour.
 
 from .agent import Agent, Personality
 from .engine import Simulation
+from .interactions import Interactions
 from .metrics import Metrics
 from .policy import HeuristicPolicy, LLMPolicy, Policy
 from .types import Action, ActionResult, ActionType, Direction, Resource
@@ -17,6 +18,7 @@ __all__ = [
     "Agent",
     "Personality",
     "Simulation",
+    "Interactions",
     "Metrics",
     "HeuristicPolicy",
     "LLMPolicy",

@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from .actions import ActionExecutor
 from .agent import Agent
+from .interactions import Interactions
 from .metrics import Metrics
 from .observation import build_observation
 from .policy import Policy
@@ -34,8 +35,12 @@ class Simulation:
         self.world = world
         self.agents: dict[str, Agent] = {a.id: a for a in agents}
         self.policies: dict[str, Policy] = {a.id: policy_factory(a) for a in agents}
-        self.executor = ActionExecutor(self.world, self.agents)
+        self.interactions = Interactions()
+        self.executor = ActionExecutor(self.world, self.agents, self.interactions)
         self.metrics = Metrics()
+        # Events (trades, speech) produced during the most recent tick, for
+        # metrics and the render snapshot. Cleared at the start of every tick.
+        self.recent_events: list[dict] = []
         self._rng = random.Random(seed)
 
     def step(self) -> None:
@@ -47,18 +52,29 @@ class Simulation:
                 self.metrics.deaths += 1
 
         # 2. Decisions and actions, in randomised order.
+        self.executor.events.clear()
         order = [a for a in self.agents.values() if a.alive]
         self._rng.shuffle(order)
         for agent in order:
-            obs = build_observation(self.world, agent, self.agents)
+            obs = build_observation(self.world, agent, self.agents, self.interactions)
             action = self.policies[agent.id].decide(obs)
             result = self.executor.execute(agent, action)
+            self.interactions.clear_inbox(agent.id)
             self.metrics.record_action(agent.id, action.type.value)
             if action.type == ActionType.GATHER and result.ok:
                 self.metrics.record_gather(result.data["resource"], result.data["amount"])
 
-        # 3. World processes + measurement.
+        # 3. Drain social events into metrics.
+        self.recent_events = list(self.executor.events)
+        for ev in self.recent_events:
+            if ev["type"] == "trade":
+                self.metrics.record_trade(ev["give"], ev["receive"])
+            elif ev["type"] == "speak":
+                self.metrics.record_message()
+
+        # 4. World processes, offer expiry + measurement.
         self.world.step()
+        self.interactions.expire(self.world.tick)
         self.metrics.record_population(self.world, self.agents)
 
     def run(self, ticks: int, on_tick: Callable[["Simulation"], None] | None = None) -> Metrics:

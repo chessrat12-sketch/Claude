@@ -19,21 +19,30 @@
 
 ## 현재 상태
 
-- ✅ **v0.1 생존 / v0.2 채집** — substrate + 대조군(`HeuristicPolicy`) +
-  실험군(`LLMPolicy`, 백엔드 교체식) 구현.
-- ⏳ **v0.3 거래** — 다음 단계 (→ `docs/07_roadmap.md`).
+- ✅ **v0.1 생존 / v0.2 채집 / v0.3 거래·대화** — substrate + 대조군
+  (`HeuristicPolicy`) + 실험군(`LLMPolicy`, 백엔드 교체식) 구현.
+- ✅ **3D 시각화** — Python 서버가 월드 스냅샷을 스트리밍, 무설치 브라우저
+  뷰어와 Unity 3D "작은 마을"이 같은 계약을 소비.
+- ⏳ **v0.4 분업/제작** — 다음 단계 (→ `docs/07_roadmap.md`).
 
-오프라인 베이스라인에서 10명이 200틱 전원 생존, 부의 지니 ≈ 0.18 → 세계가
-"생존 가능(solvable)"함을 검증.
+오프라인 베이스라인 200틱에서 전원 생존, 거래 6건 성사, **창발 교환비
+나무→식량 ≈ 0.5**(설정한 적 없음, 거래에서 읽어냄), 지니 ≈ 0.30.
 
 ## 빠른 시작
 
 ```bash
-# 의존성 없음 — 순수 표준 라이브러리로 오프라인 실행
 cd emergent_civilization
-python -m examples.run_v01_survival     # 휴리스틱 베이스라인 데모
+
+# 1) 3D 마을 보기 — 서버 실행 후 브라우저에서 http://localhost:8000
+python -m server.viz_server
+
+# 2) 헤드리스 데모 (의존성 0, 순수 표준 라이브러리)
+python -m examples.run_v01_survival
 python tests/test_survival.py           # 테스트 (또는: pytest tests/)
 ```
+
+Unity 3D 클라이언트 설정은 `unity/README_UNITY.md` (5분), 시각화 구조는
+`docs/08_visualization.md` 참조.
 
 ### LLM 에이전트로 실행하려면
 
@@ -63,13 +72,22 @@ emergent_civilization/
 │   ├── world.py             # 그리드, 자원 노드, 재생
 │   ├── agent.py             # 신체·기억·성격·관계 (직업 없음)
 │   ├── actions.py           # 행동 실행·허용 (rules engine)
+│   ├── interactions.py      # 메시지·거래 제안 전송 계층 (v0.3)
 │   ├── observation.py       # 부분·자기중심 관찰
 │   ├── policy.py            # Heuristic(대조) / LLM(실험)
 │   ├── llm_client.py        # LLM 백엔드 (Echo / OpenAICompat)
 │   ├── metrics.py           # 창발 지표 수집·분석
+│   ├── snapshot.py          # 전역 렌더 스냅샷 (시각화 전용)
 │   └── engine.py            # 틱 루프
+├── server/
+│   └── viz_server.py        # 라이브 시뮬레이션 + GET /state 스트리밍
+├── viewer/
+│   └── village.html         # 무설치 아이소메트릭 마을 뷰어
+├── unity/                   # Unity 3D 클라이언트 (C# + 설정 가이드)
+│   ├── Scripts/*.cs
+│   └── README_UNITY.md
 ├── examples/
-│   └── run_v01_survival.py  # 오프라인 생존 데모
+│   └── run_v01_survival.py  # 오프라인 생존·거래 데모
 ├── tests/
 │   └── test_survival.py
 └── docs/
@@ -79,7 +97,8 @@ emergent_civilization/
     ├── 04_agent_design.md             # 에이전트 상태·성격·기억·관계
     ├── 05_prompt_and_decision_loop.md # 프롬프트 설계·편향 통제
     ├── 06_metrics.md                  # 측정 항목
-    └── 07_roadmap.md                  # v0.1 → v1.0 로드맵
+    ├── 07_roadmap.md                  # v0.1 → v1.0 로드맵
+    └── 08_visualization.md            # 시각화 (브라우저 + Unity)
 ```
 
 ## 실험 환경

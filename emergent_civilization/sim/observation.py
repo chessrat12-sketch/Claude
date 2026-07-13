@@ -12,12 +12,18 @@ from __future__ import annotations
 from typing import Any
 
 from .agent import Agent
+from .interactions import Interactions
 from .world import World
 
 VISION_RADIUS = 2
 
 
-def build_observation(world: World, agent: Agent, agents: dict[str, Agent]) -> dict[str, Any]:
+def build_observation(
+    world: World,
+    agent: Agent,
+    agents: dict[str, Agent],
+    interactions: Interactions | None = None,
+) -> dict[str, Any]:
     here = world.tile(agent.pos)
     nearby_nodes = []
     for tile in [here, *world.neighbours(agent.pos, VISION_RADIUS)]:
@@ -45,6 +51,9 @@ def build_observation(world: World, agent: Agent, agents: dict[str, Agent]) -> d
                 }
             )
 
+    inbox = interactions.inbox.get(agent.id, []) if interactions else []
+    offers = interactions.offers.get(agent.id, []) if interactions else []
+
     return {
         "tick": world.tick,
         "self": {
@@ -67,6 +76,16 @@ def build_observation(world: World, agent: Agent, agents: dict[str, Agent]) -> d
         "recent_memory": [
             {"tick": e.tick, "kind": e.kind, "detail": e.detail}
             for e in list(agent.memory)[-6:]
+        ],
+        "incoming_messages": [{"from": m.frm, "text": m.text} for m in inbox],
+        "pending_offers": [
+            {
+                "id": o.id,
+                "from": o.frm,
+                "give": {r.value: n for r, n in o.give.items()},
+                "receive": {r.value: n for r, n in o.receive.items()},
+            }
+            for o in offers
         ],
     }
 

@@ -31,11 +31,11 @@ class Metrics:
         default_factory=lambda: defaultdict(Counter)
     )
 
-    # Economy scaffolding (populated from v0.3 onward).
+    # Economy (populated from v0.3 onward).
     trades: int = 0
-    price_history: list[float] = field(default_factory=list)
+    price_log: list[dict] = field(default_factory=list)
 
-    # Society scaffolding (populated from v0.6 onward).
+    # Society scaffolding (rule proposals populated from v0.7 onward).
     messages: int = 0
     rule_proposals: int = 0
 
@@ -46,6 +46,26 @@ class Metrics:
 
     def record_gather(self, resource: str, amount: int) -> None:
         self.gather_by_resource[resource] += amount
+
+    def record_trade(self, give: dict, receive: dict) -> None:
+        self.trades += 1
+        self.price_log.append({"give": dict(give), "receive": dict(receive)})
+
+    def record_message(self) -> None:
+        self.messages += 1
+
+    def mean_exchange_ratio(self, give_res: str, recv_res: str) -> float | None:
+        """Average units of ``recv_res`` paid per unit of ``give_res``.
+
+        This is the emergent "price" — never set anywhere, only read back out of
+        the trades that actually happened. Returns None if that pair never traded.
+        """
+        ratios = []
+        for entry in self.price_log:
+            g, r = entry["give"], entry["receive"]
+            if list(g) == [give_res] and list(r) == [recv_res] and g[give_res]:
+                ratios.append(r[recv_res] / g[give_res])
+        return round(statistics.mean(ratios), 3) if ratios else None
 
     def record_population(self, world: World, agents: dict[str, Agent]) -> None:
         self.alive_over_time.append(sum(1 for a in agents.values() if a.alive))
@@ -87,6 +107,9 @@ class Metrics:
             else 0,
             "action_counts": dict(self.action_counts),
             "gather_by_resource": dict(self.gather_by_resource),
+            "trades": self.trades,
+            "messages": self.messages,
+            "price_wood_for_food": self.mean_exchange_ratio("wood", "food"),
             "wealth_gini": round(self.wealth_gini(agents), 3),
             "world_resources": {r.value: n for r, n in world.total_resources().items()},
             "roles": self.role_specialization(),

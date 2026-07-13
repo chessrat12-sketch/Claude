@@ -43,7 +43,8 @@ class HeuristicPolicy:
     def decide(self, obs: dict[str, Any]) -> Action:
         me = obs["self"]
         hunger, energy = me["hunger"], me["energy"]
-        food = me["inventory"].get(Resource.FOOD.value, 0)
+        inv = me["inventory"]
+        food = inv.get(Resource.FOOD.value, 0)
 
         # 1. Eat before starving if we can.
         if hunger >= 60 and food > 0:
@@ -52,6 +53,43 @@ class HeuristicPolicy:
         # 2. Recover energy before collapse.
         if energy <= 25:
             return Action(ActionType.REST, reason="energy is low")
+
+        # 2b. Weigh any standing offers. Two reasons a trade is worth taking:
+        #     (a) it brings food we need, or (b) we have a food surplus and can
+        #     pick up materials cheaply (a bet that materials will matter once
+        #     crafting exists). Complementary needs are what let a trade clear.
+        food_val = Resource.FOOD.value
+        for offer in obs.get("pending_offers", []):
+            gain, cost = offer["give"], offer["receive"]
+            if not all(inv.get(r, 0) >= n for r, n in cost.items()):
+                continue
+            gains_food = gain.get(food_val, 0) > 0
+            food_paid = cost.get(food_val, 0)
+            takes_material = any(r != food_val for r in gain)
+            wants_food_now = gains_food and (hunger >= 40 or food < 4)
+            surplus_buyer = takes_material and (food - food_paid) >= 6
+            if wants_food_now or surplus_buyer:
+                return Action(
+                    ActionType.TRADE,
+                    {"offer": offer["id"], "accept": True},
+                    reason="food need" if wants_food_now else "banking materials",
+                )
+
+        # 2c. Short on food but sitting on surplus material next to someone?
+        #     Offer to trade material for food. (An emergent "market" only if
+        #     many agents independently do this — see docs/06_metrics.md.)
+        if food < 4 and hunger < 70 and obs["nearby_agents"]:
+            surplus = next(
+                (r for r in (Resource.WOOD.value, Resource.STONE.value) if inv.get(r, 0) >= 3),
+                None,
+            )
+            if surplus is not None:
+                partner = obs["nearby_agents"][0]["id"]
+                return Action(
+                    ActionType.TRADE,
+                    {"to": partner, "give": {surplus: 2}, "receive": {Resource.FOOD.value: 1}},
+                    reason="trading surplus material for food",
+                )
 
         # 3. Standing on a node worth taking? Gather it.
         on_node = obs.get("on_tile_node")
@@ -97,13 +135,19 @@ class HeuristicPolicy:
 # --------------------------------------------------------------------------
 SYSTEM_INSTRUCTIONS = """You are an autonomous being in a small shared world.
 You are not told what to do. You have your own memory, personality and goals.
-You survive by managing hunger and energy, and you may gather, move, rest, or
-eat. Other beings live here too; over time you may find it useful to cooperate,
-trade, build trust, or propose shared rules — but nothing forces you to.
+You survive by managing hunger and energy. Other beings live nearby; over time
+you may find it useful to talk, trade, build trust, or propose shared rules —
+but nothing forces you to. Do what serves you.
 
 Respond with ONE action as strict JSON and nothing else:
-{"action": "<move|gather|eat|rest|idle>", "args": {...}, "reason": "<short>"}
-For move, args must be {"direction": "north|south|east|west"}."""
+{"action": "<move|gather|eat|rest|idle|speak|trade>", "args": {...}, "reason": "<short>"}
+
+Action args:
+- move:   {"direction": "north|south|east|west"}
+- speak:  {"to": "<agent id>", "message": "<text>"}
+- trade (propose):  {"to": "<agent id>", "give": {"wood": 2}, "receive": {"food": 1}}
+- trade (respond):  {"offer": "<offer id from pending_offers>", "accept": true|false}
+- gather/eat/rest/idle take no args."""
 
 
 class LLMPolicy:

@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Emergent Civilization — Village</title>
+<style>
+  :root { --bg:#0f1420; --panel:#171d2b; --ink:#e7ecf5; --muted:#8b96ad; --line:#26304a; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family: ui-sans-serif, system-ui, "Helvetica Neue", Arial, sans-serif; }
+  #app { display:flex; height:100vh; }
+  #stage { flex:1; position:relative; overflow:hidden; }
+  canvas { display:block; width:100%; height:100%; }
+  #side { width:300px; flex:none; background:var(--panel); border-left:1px solid var(--line);
+    padding:16px; display:flex; flex-direction:column; gap:14px; overflow:hidden; }
+  h1 { font-size:15px; margin:0; letter-spacing:.02em; }
+  h1 small { color:var(--muted); font-weight:400; display:block; font-size:11px; margin-top:2px; }
+  .stats { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .stat { background:#111726; border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  .stat .k { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
+  .stat .v { font-size:20px; font-weight:650; margin-top:2px; font-variant-numeric:tabular-nums; }
+  .feedwrap { flex:1; min-height:0; display:flex; flex-direction:column; }
+  .feedwrap h2 { font-size:11px; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--muted); margin:0 0 6px; }
+  #feed { flex:1; overflow-y:auto; font-size:12px; line-height:1.5; }
+  #feed .ev { padding:4px 8px; border-radius:6px; margin-bottom:4px; background:#111726; }
+  #feed .trade { border-left:3px solid #4ea1ff; }
+  #feed .speak { border-left:3px solid #ffd166; color:var(--muted); }
+  #status { font-size:11px; color:var(--muted); }
+  #status.err { color:#ff6b6b; }
+  .legend { display:flex; gap:12px; font-size:11px; color:var(--muted); }
+  .legend span { display:flex; align-items:center; gap:5px; }
+  .dot { width:9px; height:9px; border-radius:2px; display:inline-block; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage"><canvas id="c"></canvas></div>
+  <aside id="side">
+    <h1>Emergent Civilization<small>자율 AI 문명 — 작은 마을</small></h1>
+    <div class="stats" id="stats"></div>
+    <div class="legend">
+      <span><i class="dot" style="background:#5bbf6a"></i>식량</span>
+      <span><i class="dot" style="background:#9b6a3c"></i>나무</span>
+      <span><i class="dot" style="background:#9aa3b2"></i>돌</span>
+    </div>
+    <div class="feedwrap">
+      <h2>사건 (거래 · 대화)</h2>
+      <div id="feed"></div>
+    </div>
+    <div id="status">연결 중…</div>
+  </aside>
+</div>
+<script>
+const TILE_W = 46, TILE_H = 24, TILE_TH = 10;   // isometric tile size + thickness
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+let snap = null;          // latest snapshot from server
+const drawn = new Map();  // id -> {x,y} interpolated screen-grid position
+const pulses = [];        // transient trade/speak visual pulses
+const seenEvents = [];    // event feed history
+
+function resize() {
+  const r = canvas.parentElement.getBoundingClientRect();
+  canvas.width = r.width * DPR; canvas.height = r.height * DPR;
+  canvas.style.width = r.width + 'px'; canvas.style.height = r.height + 'px';
+}
+window.addEventListener('resize', resize); resize();
+
+// ---- isometric projection --------------------------------------------
+function iso(gx, gy, W, H, cw, ch) {
+  const ox = cw / 2, oy = ch / 2 - (W + H) * TILE_H / 4;
+  return {
+    sx: ox + (gx - gy) * TILE_W / 2,
+    sy: oy + (gx + gy) * TILE_H / 2,
+  };
+}
+
+function hue(id) { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
+
+// ---- drawing primitives ----------------------------------------------
+function tileDiamond(sx, sy, fill, side) {
+  ctx.beginPath();
+  ctx.moveTo(sx, sy - TILE_H/2); ctx.lineTo(sx + TILE_W/2, sy);
+  ctx.lineTo(sx, sy + TILE_H/2); ctx.lineTo(sx - TILE_W/2, sy); ctx.closePath();
+  ctx.fillStyle = fill; ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,.10)'; ctx.stroke();
+  // side faces for a bit of 3D depth
+  ctx.fillStyle = side;
+  ctx.beginPath();
+  ctx.moveTo(sx - TILE_W/2, sy); ctx.lineTo(sx, sy + TILE_H/2);
+  ctx.lineTo(sx, sy + TILE_H/2 + TILE_TH); ctx.lineTo(sx - TILE_W/2, sy + TILE_TH);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = shade(side, -12);
+  ctx.beginPath();
+  ctx.moveTo(sx + TILE_W/2, sy); ctx.lineTo(sx, sy + TILE_H/2);
+  ctx.lineTo(sx, sy + TILE_H/2 + TILE_TH); ctx.lineTo(sx + TILE_W/2, sy + TILE_TH);
+  ctx.closePath(); ctx.fill();
+}
+function shade(hex, d) {
+  const n = parseInt(hex.slice(1),16);
+  const r = Math.max(0,Math.min(255,(n>>16)+d)), g=Math.max(0,Math.min(255,((n>>8)&255)+d)), b=Math.max(0,Math.min(255,(n&255)+d));
+  return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
+}
+function shadow(sx, sy, w) {
+  ctx.fillStyle = 'rgba(0,0,0,.22)';
+  ctx.beginPath(); ctx.ellipse(sx, sy, w, w*0.5, 0, 0, Math.PI*2); ctx.fill();
+}
+
+function drawNode(sx, sy, node) {
+  const scale = 0.5 + 0.5 * (node.amount / Math.max(1, node.capacity));
+  shadow(sx, sy + 2, 9*scale);
+  if (node.resource === 'wood' || node.resource === 'food') {
+    const trunk = node.resource === 'wood' ? '#7a5230' : '#6b4a2a';
+    const leaf  = node.resource === 'wood' ? '#3f7a43' : '#5bbf6a';
+    ctx.fillStyle = trunk; ctx.fillRect(sx-2, sy-10*scale, 4, 12*scale);
+    ctx.fillStyle = leaf;
+    ctx.beginPath(); ctx.arc(sx, sy-14*scale, 9*scale, 0, Math.PI*2); ctx.fill();
+    if (node.resource === 'food') {  // berries
+      ctx.fillStyle = '#e0524a';
+      for (let i=0;i<3;i++){ ctx.beginPath();
+        ctx.arc(sx-4+i*4, sy-13*scale+ (i%2?2:-2), 1.6, 0, Math.PI*2); ctx.fill(); }
+    }
+  } else {  // stone
+    ctx.fillStyle = '#9aa3b2';
+    ctx.beginPath(); ctx.ellipse(sx, sy-4*scale, 9*scale, 6*scale, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#b7bfcc';
+    ctx.beginPath(); ctx.ellipse(sx-3, sy-6*scale, 4*scale, 3*scale, 0, 0, Math.PI*2); ctx.fill();
+  }
+}
+
+function drawAgent(sx, sy, a) {
+  const alive = a.alive;
+  const h = hue(a.id);
+  shadow(sx, sy + 1, 7);
+  const body = alive ? `hsl(${h} 55% 55%)` : '#4a5265';
+  const head = alive ? `hsl(${h} 45% 78%)` : '#6b7488';
+  ctx.fillStyle = body;
+  roundRect(sx-4, sy-16, 8, 14, 3); ctx.fill();
+  ctx.fillStyle = head;
+  ctx.beginPath(); ctx.arc(sx, sy-19, 4.2, 0, Math.PI*2); ctx.fill();
+  // health bar
+  if (alive) {
+    ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(sx-7, sy-28, 14, 3);
+    const t = a.health/100;
+    ctx.fillStyle = t>0.5? '#5bbf6a' : t>0.25? '#ffd166' : '#e0524a';
+    ctx.fillRect(sx-7, sy-28, 14*t, 3);
+  }
+  // name
+  ctx.fillStyle = alive ? 'rgba(231,236,245,.85)' : 'rgba(139,150,173,.6)';
+  ctx.font = '9px ui-sans-serif, system-ui'; ctx.textAlign = 'center';
+  ctx.fillText(a.name, sx, sy-32);
+}
+function roundRect(x,y,w,h,r){ ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+// ---- main render loop -------------------------------------------------
+function render() {
+  const cw = canvas.width/DPR, ch = canvas.height/DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.clearRect(0,0,cw,ch);
+  if (!snap) { requestAnimationFrame(render); return; }
+  const W = snap.width, H = snap.height;
+
+  // ground tiles (checker for a tidy village lawn)
+  for (let gx=0; gx<W; gx++) for (let gy=0; gy<H; gy++) {
+    const {sx, sy} = iso(gx, gy, W, H, cw, ch);
+    const light = (gx+gy)%2===0;
+    tileDiamond(sx, sy, light? '#3b7a4a' : '#357044', light? '#2c5c39' : '#284f33');
+  }
+  // build render list (nodes + agents) sorted by depth (gx+gy)
+  const items = [];
+  for (const n of snap.nodes) items.push({depth:n.x+n.y, kind:'node', o:n});
+  for (const a of snap.agents) {
+    const d = drawn.get(a.id) || {x:a.x, y:a.y};
+    d.x += (a.x - d.x)*0.2; d.y += (a.y - d.y)*0.2;  // smooth glide
+    drawn.set(a.id, d);
+    items.push({depth:d.x+d.y+0.5, kind:'agent', o:a, d});
+  }
+  items.sort((p,q)=>p.depth-q.depth);
+  for (const it of items) {
+    if (it.kind==='node') { const {sx,sy}=iso(it.o.x,it.o.y,W,H,cw,ch); drawNode(sx,sy,it.o); }
+    else { const {sx,sy}=iso(it.d.x,it.d.y,W,H,cw,ch); drawAgent(sx,sy,it.o); }
+  }
+  // trade/speak pulses (lines between two agents)
+  for (let i=pulses.length-1;i>=0;i--){
+    const p=pulses[i]; p.life-=1; if(p.life<=0){pulses.splice(i,1);continue;}
+    const A=drawn.get(p.a), B=drawn.get(p.b); if(!A||!B) continue;
+    const s=iso(A.x,A.y,W,H,cw,ch), e=iso(B.x,B.y,W,H,cw,ch);
+    ctx.strokeStyle = p.type==='trade'? `rgba(78,161,255,${p.life/30})` : `rgba(255,209,102,${p.life/30})`;
+    ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(s.sx,s.sy-10); ctx.lineTo(e.sx,e.sy-10); ctx.stroke();
+  }
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+// ---- HUD + event feed -------------------------------------------------
+function renderStats(s) {
+  const box = document.getElementById('stats');
+  const cells = [
+    ['틱', s.tick ?? 0], ['생존', `${s.alive ?? 0}/${s.population ?? 0}`],
+    ['거래', s.trades ?? 0], ['대화', s.messages ?? 0],
+    ['지니(부의집중)', (s.gini ?? 0).toFixed(2)],
+    ['가격 나무→식량', s.priceWoodForFood==null? '—' : s.priceWoodForFood],
+  ];
+  box.innerHTML = cells.map(([k,v])=>`<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+}
+function pushEvents(events) {
+  const feed = document.getElementById('feed');
+  for (const e of events) {
+    if (e.a && e.b) pulses.push({a:e.a, b:e.b, type:e.type, life:30});
+    const div = document.createElement('div');
+    div.className = 'ev ' + e.type;
+    div.textContent = (e.type==='trade'?'🤝 ':'💬 ') + (e.text||e.type);
+    feed.prepend(div);
+    seenEvents.push(div); if (seenEvents.length>60) seenEvents.shift().remove();
+  }
+}
+
+// ---- polling ----------------------------------------------------------
+async function poll() {
+  const status = document.getElementById('status');
+  try {
+    const res = await fetch('/state', {cache:'no-store'});
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    const isNew = !snap || data.tick !== snap.tick;
+    snap = data;
+    renderStats(data.stats || {});
+    if (isNew && data.events && data.events.length) pushEvents(data.events);
+    status.className = ''; status.textContent = `연결됨 · 틱 ${data.tick}`;
+  } catch (err) {
+    status.className = 'err';
+    status.textContent = '서버 대기 중… (python -m server.viz_server 실행)';
+  }
+}
+poll(); setInterval(poll, 300);
+</script>
+</body>
+</html>

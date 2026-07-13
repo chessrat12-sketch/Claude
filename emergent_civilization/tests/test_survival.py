@@ -66,9 +66,44 @@ def test_future_action_is_refused_not_crashed():
     world = World(2, 2)
     agent = Agent(id="x", name="X", pos=(0, 0))
     ex = ActionExecutor(world, {"x": agent})
-    result = ex.execute(agent, Action(ActionType.TRADE, {"with": "y"}))
+    # PROPOSE_RULE belongs to a later milestone (v0.7) and must be refused.
+    result = ex.execute(agent, Action(ActionType.PROPOSE_RULE, {"text": "share food"}))
     assert not result.ok
     assert "not available" in result.message
+
+
+def test_trade_completes_and_swaps_inventory():
+    world = World(3, 3)
+    seller = Agent(id="s", name="Seller", pos=(1, 1))
+    buyer = Agent(id="b", name="Buyer", pos=(1, 1))
+    seller.add(Resource.WOOD, 2)
+    buyer.add(Resource.FOOD, 3)
+    agents = {"s": seller, "b": buyer}
+    ex = ActionExecutor(world, agents)
+    # Seller proposes 2 wood for 1 food; buyer accepts.
+    propose = ex.execute(seller, Action(ActionType.TRADE,
+                         {"to": "b", "give": {"wood": 2}, "receive": {"food": 1}}))
+    assert propose.ok
+    offer_id = propose.data["offer"]
+    accept = ex.execute(buyer, Action(ActionType.TRADE, {"offer": offer_id, "accept": True}))
+    assert accept.ok
+    assert buyer.held(Resource.WOOD) == 2 and seller.held(Resource.WOOD) == 0
+    assert seller.held(Resource.FOOD) == 1 and buyer.held(Resource.FOOD) == 2
+    # A completed exchange builds mutual trust.
+    assert seller.relationships["b"] > 0 and buyer.relationships["s"] > 0
+    assert any(e["type"] == "trade" for e in ex.events)
+
+
+def test_trade_rejected_when_partner_out_of_range():
+    world = World(6, 6)
+    a = Agent(id="a", name="A", pos=(0, 0))
+    b = Agent(id="b", name="B", pos=(5, 5))
+    a.add(Resource.WOOD, 2)
+    ex = ActionExecutor(world, {"a": a, "b": b})
+    result = ex.execute(a, Action(ActionType.TRADE,
+                        {"to": "b", "give": {"wood": 2}, "receive": {"food": 1}}))
+    assert not result.ok
+    assert "too far" in result.message
 
 
 def test_parse_action_tolerates_chatty_output():
