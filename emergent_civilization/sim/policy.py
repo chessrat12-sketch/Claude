@@ -45,20 +45,70 @@ class HeuristicPolicy:
         hunger, energy = me["hunger"], me["energy"]
         inv = me["inventory"]
         food = inv.get(Resource.FOOD.value, 0)
+        wood = inv.get(Resource.WOOD.value, 0)
+        stone = inv.get(Resource.STONE.value, 0)
+        food_val = Resource.FOOD.value
 
         # 1. Eat before starving if we can.
         if hunger >= 60 and food > 0:
             return Action(ActionType.EAT, reason="hunger is high")
 
-        # 2. Recover energy before collapse.
+        # 2. Survive the night. Threats hunt exposed loners, so seek cover:
+        #    rest in a shelter, move to one, or huddle with others (safety in
+        #    numbers halves a bite). This is where cooperation earns its keep.
+        if obs.get("is_night") and obs.get("nearby_threats"):
+            if me.get("sheltered"):
+                return Action(ActionType.REST, reason="sheltering through the night")
+            shelter = self._nearest(me["pos"], obs.get("nearby_shelters", []))
+            if shelter is not None:
+                return self._step_toward(me["pos"], shelter)
+            if obs["nearby_agents"]:
+                mate = self._nearest(me["pos"], obs["nearby_agents"])
+                if _manhattan(me["pos"], mate["pos"]) > 1:
+                    return self._step_toward(me["pos"], mate)
+            return Action(ActionType.REST, reason="hunkering down")
+
+        # 3. Recover energy before collapse (in shelter if we're on one).
         if energy <= 25:
             return Action(ActionType.REST, reason="energy is low")
 
-        # 2b. Weigh any standing offers. Two reasons a trade is worth taking:
+        # 4. Generosity: help a visibly-suffering neighbour we don't distrust.
+        #    Costs a little food, buys reputation (their trust in us jumps).
+        if food >= 6:
+            for other in obs["nearby_agents"]:
+                if other.get("health", 100) < 40 and other.get("trust", 0) >= 0:
+                    return Action(
+                        ActionType.GIVE,
+                        {"to": other["id"], "items": {food_val: 1}},
+                        reason="helping a starving neighbour",
+                    )
+
+        # 5. Build a shelter once we can afford it and none is nearby — this is
+        #    what gives wood/stone their value and makes trade rational.
+        need_shelter = not me.get("sheltered") and not obs.get("nearby_shelters")
+        if need_shelter and wood >= 3 and stone >= 1:
+            return Action(ActionType.BUILD, reason="raising a shelter")
+
+        # 6. No shelter yet and short on the materials for one? With a little
+        #    food banked, go deliberately mine the material we lack.
+        if need_shelter and food >= 3 and hunger < 65 and (wood < 3 or stone < 1):
+            want = Resource.STONE.value if stone < 1 else Resource.WOOD.value
+            on_node = obs.get("on_tile_node")
+            if on_node is not None and on_node["resource"] == want:
+                return Action(ActionType.GATHER, reason=f"mining {want} for a shelter")
+            node = self._nearest(me["pos"], [n for n in obs["nearby_nodes"] if n["resource"] == want])
+            if node is not None:
+                return self._step_toward(me["pos"], node)
+
+        # 7. Craft a tool from surplus materials to gather faster (division of
+        #    labour: some specialise in tools).
+        if wood >= 4 and stone >= 2 and inv.get(Resource.TOOL.value, 0) == 0:
+            return Action(ActionType.CRAFT, reason="crafting a tool")
+
+        # 8. Weigh any standing offers. Two reasons a trade is worth taking:
         #     (a) it brings food we need, or (b) we have a food surplus and can
-        #     pick up materials cheaply (a bet that materials will matter once
-        #     crafting exists). Complementary needs are what let a trade clear.
-        food_val = Resource.FOOD.value
+        #     bank materials (now genuinely valuable — shelters & tools need
+        #     them). Complementary needs are what let a trade clear.
         for offer in obs.get("pending_offers", []):
             gain, cost = offer["give"], offer["receive"]
             if not all(inv.get(r, 0) >= n for r, n in cost.items()):
@@ -75,12 +125,12 @@ class HeuristicPolicy:
                     reason="food need" if wants_food_now else "banking materials",
                 )
 
-        # 2c. Short on food but sitting on surplus material next to someone?
-        #     Offer to trade material for food. (An emergent "market" only if
-        #     many agents independently do this — see docs/06_metrics.md.)
+        # 9. Short on food but holding more material than we need to build?
+        #    Offer the excess for food. Kept above build needs (3 wood/1 stone)
+        #    so trading never starves our own shelter plans.
         if food < 4 and hunger < 70 and obs["nearby_agents"]:
             surplus = next(
-                (r for r in (Resource.WOOD.value, Resource.STONE.value) if inv.get(r, 0) >= 3),
+                (r for r in (Resource.WOOD.value, Resource.STONE.value) if inv.get(r, 0) >= 6),
                 None,
             )
             if surplus is not None:
@@ -91,7 +141,7 @@ class HeuristicPolicy:
                     reason="trading surplus material for food",
                 )
 
-        # 3. Standing on a node worth taking? Gather it.
+        # 9. Standing on a node worth taking? Gather it.
         on_node = obs.get("on_tile_node")
         if on_node is not None:
             want_food = food < 3 + int(self.personality.caution * 4)
@@ -100,14 +150,18 @@ class HeuristicPolicy:
             if on_node["resource"] != Resource.FOOD.value:
                 return Action(ActionType.GATHER, reason="collecting materials")
 
-        # 4. Head toward the nearest useful node.
+        # 10. Head toward the nearest useful node.
         target = self._nearest_node(me["pos"], obs["nearby_nodes"], prefer_food=food < 3)
         if target is not None:
             return self._step_toward(me["pos"], target)
 
-        # 5. Nothing in sight: wander (curiosity picks the direction).
+        # 11. Nothing in sight: wander (curiosity picks the direction).
         idx = (obs["tick"] + int(self.personality.curiosity * 3)) % 4
         return Action(ActionType.MOVE, {"direction": list(Direction)[idx].value}, "exploring")
+
+    def _nearest(self, pos, items):
+        """Nearest of a list of dicts that each carry a 'pos'."""
+        return min(items, key=lambda it: _manhattan(pos, it["pos"])) if items else None
 
     def _nearest_node(self, pos, nodes, prefer_food):
         candidates = nodes
@@ -135,18 +189,24 @@ class HeuristicPolicy:
 # --------------------------------------------------------------------------
 SYSTEM_INSTRUCTIONS = """You are an autonomous being in a small shared world.
 You are not told what to do. You have your own memory, personality and goals.
-You survive by managing hunger and energy. Other beings live nearby; over time
-you may find it useful to talk, trade, build trust, or propose shared rules —
-but nothing forces you to. Do what serves you.
+You survive by managing hunger and energy. At night predators hunt anyone caught
+alone in the open; standing in a group or inside a shelter keeps you safe. Wood
+and stone let you craft tools (gather faster) or build a shelter. Other beings
+live nearby; over time you may find it useful to talk, trade, give, build trust,
+or propose shared rules — but nothing forces you to. Do what serves you.
 
 Respond with ONE action as strict JSON and nothing else:
-{"action": "<move|gather|eat|rest|idle|speak|trade>", "args": {...}, "reason": "<short>"}
+{"action": "<move|gather|eat|rest|idle|speak|trade|give|craft|build>",
+ "args": {...}, "reason": "<short>"}
 
 Action args:
 - move:   {"direction": "north|south|east|west"}
 - speak:  {"to": "<agent id>", "message": "<text>"}
 - trade (propose):  {"to": "<agent id>", "give": {"wood": 2}, "receive": {"food": 1}}
 - trade (respond):  {"offer": "<offer id from pending_offers>", "accept": true|false}
+- give:   {"to": "<agent id>", "items": {"food": 1}}
+- craft:  {} (spends 2 wood + 1 stone -> 1 tool)
+- build:  {} (spends 3 wood + 1 stone -> a shelter on your tile)
 - gather/eat/rest/idle take no args."""
 
 

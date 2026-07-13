@@ -29,6 +29,121 @@ class EchoBackend:
         return json.dumps({"action": "idle", "reason": "offline echo backend"})
 
 
+class MockReasoningBackend:
+    """Offline stand-in that produces *varied* actions with plausible reasons.
+
+    Unlike EchoBackend it actually looks at the observation embedded in the
+    prompt and picks a survival-sensible action, so the LLM code path (build
+    prompt -> complete -> parse -> act) can be demonstrated end to end without a
+    real model or network. It is NOT the research subject — it only stands in
+    for a genuine LLM so the reasoning-log demo runs anywhere. Point a real
+    backend at it (env vars) to run the actual experiment.
+    """
+
+    def complete(self, prompt: str) -> str:
+        obs = _extract_observation(prompt)
+        me = obs.get("self", {})
+        inv = me.get("inventory", {})
+        hunger = me.get("hunger", 0)
+        energy = me.get("energy", 100)
+        food = inv.get("food", 0)
+
+        if hunger >= 60 and food > 0:
+            return _act("eat", reason="I'm getting hungry, so I'll eat now")
+        if obs.get("is_night") and obs.get("nearby_threats") and not me.get("sheltered"):
+            if obs.get("nearby_agents"):
+                return _act("move", {"direction": _toward(me, obs["nearby_agents"][0])},
+                            "wolves are out — safer to stick with the others")
+            return _act("rest", reason="hunkering down for the night")
+        if energy <= 25:
+            return _act("rest", reason="low on energy, I need to recover")
+        if inv.get("wood", 0) >= 3 and inv.get("stone", 0) >= 1 \
+                and not me.get("sheltered") and not obs.get("nearby_shelters"):
+            return _act("build", reason="I have the materials, I'll build a shelter")
+        on = obs.get("on_tile_node")
+        if on and (on["resource"] != "food" or food < 4):
+            return _act("gather", reason=f"gathering {on['resource']} while I'm on it")
+        nodes = obs.get("nearby_nodes", [])
+        if nodes:
+            return _act("move", {"direction": _toward(me, nodes[0])},
+                        f"heading toward the {nodes[0]['resource']}")
+        return _act("move", {"direction": "north"}, "exploring for resources")
+
+
+class AnthropicBackend:
+    """Backend for the Anthropic Messages API (recommended: a fast Claude model).
+
+    Uses stdlib urllib so no SDK is required. Set EC_LLM_API_KEY (or
+    ANTHROPIC_API_KEY) and optionally EC_LLM_MODEL.
+    """
+
+    def __init__(
+        self,
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        max_tokens: int = 200,
+        temperature: float = 0.8,
+    ) -> None:
+        self.model = model or os.environ.get("EC_LLM_MODEL", "claude-haiku-4-5-20251001")
+        self.api_key = api_key or os.environ.get("EC_LLM_API_KEY") \
+            or os.environ.get("ANTHROPIC_API_KEY", "")
+        self.base_url = (base_url or os.environ.get("ANTHROPIC_BASE_URL",
+                         "https://api.anthropic.com")).rstrip("/")
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+
+    def complete(self, prompt: str) -> str:
+        import urllib.request
+
+        payload = json.dumps(
+            {
+                "model": self.model,
+                "max_tokens": self.max_tokens,
+                "temperature": self.temperature,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+        ).encode()
+        req = urllib.request.Request(
+            f"{self.base_url}/v1/messages",
+            data=payload,
+            headers={
+                "content-type": "application/json",
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read())
+        return body["content"][0]["text"]
+
+
+# -- helpers for the mock backend -----------------------------------------
+def _extract_observation(prompt: str) -> dict:
+    """Pull the observation JSON block back out of a built prompt."""
+    marker = "Current observation:\n"
+    start = prompt.find(marker)
+    if start == -1:
+        return {}
+    start += len(marker)
+    end = prompt.find("\n\nYour action:", start)
+    try:
+        return json.loads(prompt[start:end if end != -1 else None])
+    except json.JSONDecodeError:
+        return {}
+
+
+def _toward(me: dict, other: dict) -> str:
+    (px, py), (tx, ty) = me.get("pos", [0, 0]), other.get("pos", [0, 0])
+    if abs(tx - px) >= abs(ty - py):
+        return "east" if tx > px else "west"
+    return "north" if ty > py else "south"
+
+
+def _act(action: str, args: dict | None = None, reason: str = "") -> str:
+    return json.dumps({"action": action, "args": args or {}, "reason": reason})
+
+
 class OpenAICompatBackend:
     """Backend for any OpenAI-compatible /chat/completions endpoint.
 

@@ -42,17 +42,22 @@
 파싱은 되지만 실행 시 명확한 실패 사유와 함께 거부된다(`actions.IMPLEMENTED_ACTIONS`).
 이렇게 하면 에이전트가 "가능의 경계"를 스스로 발견한다.
 
-| 행동 | args | 도입 | 효과 |
-|------|------|------|------|
-| `move` | `{direction}` | v0.1 | 인접 타일로 이동 |
-| `eat` | — | v0.1 | FOOD 1 소비 → 허기 −35 |
-| `rest` | — | v0.1 | 에너지 +30 |
-| `idle` | — | v0.1 | 아무것도 안 함 |
-| `gather` | — | v0.2 | 현재 타일 노드에서 최대 3 채집 |
-| `speak` | `{to, message}` | v0.3 | 인접 에이전트에게 메시지 |
-| `trade` | `{to, give, receive}` | v0.3 | 자원 교환 제안 |
-| `craft` | `{recipe}` | v0.4 | 자원 조합 → 새 아이템 |
-| `propose_rule` | `{text}` | v0.7 | 인접 에이전트에게 규범 제안 |
+| 행동 | args | 도입 | 효과 | 상태 |
+|------|------|------|------|------|
+| `move` | `{direction}` | v0.1 | 인접 타일로 이동 | ✅ |
+| `eat` | — | v0.1 | FOOD 1 소비 → 허기 −35 | ✅ |
+| `rest` | — | v0.1 | 에너지 +30 (은신처 안 +15 추가) | ✅ |
+| `idle` | — | v0.1 | 아무것도 안 함 | ✅ |
+| `gather` | — | v0.2 | 현재 타일 노드 채집(도구 보유 시 +2) | ✅ |
+| `speak` | `{to, message}` | v0.3 | 인접 에이전트에게 메시지 | ✅ |
+| `trade` | `{to, give, receive}` 또는 `{offer, accept}` | v0.3 | 교환 제안/응답 | ✅ |
+| `give` | `{to, items}` | v0.4 | 대가 없이 자원 전달(신뢰 +0.2) | ✅ |
+| `craft` | — | v0.4 | 2 wood + 1 stone → 도구(TOOL) | ✅ |
+| `build` | — | v0.4 | 3 wood + 1 stone → 은신처 | ✅ |
+| `propose_rule` | `{text}` | v0.7 | 인접 에이전트에게 규범 제안 | ⬜ |
+
+추가 substrate: **밤낮 주기**(`World.day_length`)와 **포식자**(밤에만),
+**은신처**(`Structure`), 크래프트 아이템 **TOOL** — 상세는 `09_ecology.md`.
 
 ### 설계 원칙
 - **가능성만 열고 강제하지 않는다**: `trade`/`speak`/`propose_rule` 은

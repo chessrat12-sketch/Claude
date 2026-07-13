@@ -14,11 +14,22 @@ from typing import Any
 
 
 class Resource(str, Enum):
-    """Raw materials the world can produce and agents can hold."""
+    """Things an agent can hold in its inventory.
+
+    FOOD/WOOD/STONE are *raw* materials the world produces at resource nodes.
+    TOOL is a *crafted* good — it never appears as a world node; it only comes
+    into existence when an agent crafts one (see ``actions.py``). Keeping it in
+    the same enum lets inventories, trades and gifts treat it uniformly.
+    """
 
     FOOD = "food"
     WOOD = "wood"
     STONE = "stone"
+    TOOL = "tool"
+
+    @property
+    def is_raw(self) -> bool:
+        return self in (Resource.FOOD, Resource.WOOD, Resource.STONE)
 
 
 class Direction(str, Enum):
@@ -52,11 +63,13 @@ class ActionType(str, Enum):
     MOVE = "move"          # v0.1  reposition on the grid
     GATHER = "gather"      # v0.2  collect from a resource node on the current tile
     EAT = "eat"            # v0.1  consume FOOD from inventory to reduce hunger
-    REST = "rest"          # v0.1  recover energy
+    REST = "rest"          # v0.1  recover energy (faster inside a shelter)
     IDLE = "idle"          # v0.1  do nothing this tick
     SPEAK = "speak"        # v0.3  send a message to a nearby agent
     TRADE = "trade"        # v0.3  offer an exchange of resources to a nearby agent
-    CRAFT = "craft"        # v0.4  combine resources into a new item
+    GIVE = "give"          # v0.4  hand resources to a nearby agent with nothing back
+    CRAFT = "craft"        # v0.4  combine materials into a tool
+    BUILD = "build"        # v0.4  spend materials to raise a shelter on this tile
     PROPOSE_RULE = "propose_rule"  # v0.7  suggest a norm to nearby agents
 
 

@@ -106,6 +106,80 @@ def test_trade_rejected_when_partner_out_of_range():
     assert "too far" in result.message
 
 
+def test_build_shelter_consumes_materials():
+    world = World(3, 3)
+    a = Agent(id="a", name="A", pos=(1, 1))
+    a.add(Resource.WOOD, 3)
+    a.add(Resource.STONE, 1)
+    ex = ActionExecutor(world, {"a": a})
+    result = ex.execute(a, Action(ActionType.BUILD))
+    assert result.ok
+    assert world.shelter_at((1, 1)) is not None
+    assert world.structures[(1, 1)].owner_id == "a"
+    assert a.held(Resource.WOOD) == 0 and a.held(Resource.STONE) == 0
+    # Can't build a second on the same tile.
+    a.add(Resource.WOOD, 3); a.add(Resource.STONE, 1)
+    assert not ex.execute(a, Action(ActionType.BUILD)).ok
+
+
+def test_craft_tool_and_gather_boost():
+    world = World(3, 3)
+    world.tile((1, 1)).node = ResourceNode(Resource.WOOD, amount=20, capacity=20)
+    a = Agent(id="a", name="A", pos=(1, 1))
+    a.add(Resource.WOOD, 2); a.add(Resource.STONE, 1)
+    ex = ActionExecutor(world, {"a": a})
+    assert ex.execute(a, Action(ActionType.CRAFT)).ok
+    assert a.held(Resource.TOOL) == 1 and a.held(Resource.WOOD) == 0
+    # With a tool, a gather yields more than the base amount.
+    got = ex.execute(a, Action(ActionType.GATHER))
+    assert got.data["amount"] > 3
+
+
+def test_give_transfers_and_builds_trust():
+    world = World(3, 3)
+    giver = Agent(id="g", name="Giver", pos=(1, 1))
+    poor = Agent(id="p", name="Poor", pos=(1, 1))
+    giver.add(Resource.FOOD, 3)
+    ex = ActionExecutor(world, {"g": giver, "p": poor})
+    result = ex.execute(giver, Action(ActionType.GIVE, {"to": "p", "items": {"food": 2}}))
+    assert result.ok
+    assert poor.held(Resource.FOOD) == 2 and giver.held(Resource.FOOD) == 1
+    assert poor.relationships["g"] > 0   # generosity earns the receiver's trust
+
+
+def test_predators_appear_at_night_and_can_bite():
+    from sim.ecology import Ecology
+    world = World(6, 6, day_length=10, night_fraction=0.5)
+    world.tick = 8  # inside the night window (>= 5)
+    assert world.is_night
+    victim = Agent(id="v", name="V", pos=(3, 3))
+    eco = Ecology()
+    rng = __import__("random").Random(0)
+    # Run several night ticks; a lone exposed agent should eventually be bitten.
+    bitten = False
+    for _ in range(15):
+        events = eco.update(world, {"v": victim}, rng)
+        if any(e["type"] == "attack" for e in events):
+            bitten = True
+            break
+    assert eco.predators  # predators spawned at night
+    assert bitten and victim.health < 100
+
+
+def test_shelter_prevents_predator_exposure():
+    from sim.ecology import Ecology
+    from sim.world import Structure
+    world = World(6, 6, day_length=10, night_fraction=0.5)
+    world.tick = 8
+    world.structures[(3, 3)] = Structure((3, 3), "v", 0)
+    victim = Agent(id="v", name="V", pos=(3, 3))
+    eco = Ecology()
+    rng = __import__("random").Random(0)
+    for _ in range(15):
+        eco.update(world, {"v": victim}, rng)
+    assert victim.health == 100  # never bitten while sheltered
+
+
 def test_parse_action_tolerates_chatty_output():
     a = parse_action('Sure! Here you go: {"action": "gather", "reason": "hungry"}')
     assert a.type == ActionType.GATHER

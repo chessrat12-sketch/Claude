@@ -63,17 +63,26 @@ class LiveWorld:
 
     def _build_snapshot(self) -> dict:
         m = self.sim.metrics
+        agents = self.sim.agents
         stats = {
             "tick": self.sim.world.tick,
-            "alive": sum(a.alive for a in self.sim.agents.values()),
-            "population": len(self.sim.agents),
+            "alive": sum(a.alive for a in agents.values()),
+            "population": len(agents),
             "deaths": m.deaths,
             "trades": m.trades,
-            "messages": m.messages,
-            "gini": round(m.wealth_gini(self.sim.agents), 3),
+            "gifts": m.gifts,
+            "shelters": m.structures_built,
+            "tools": m.tools_crafted,
+            "attacks": m.predator_attacks,
+            "alliances": m.alliances(agents),
+            "meanTrust": m.mean_trust(agents),
+            "gini": round(m.wealth_gini(agents), 3),
             "priceWoodForFood": m.mean_exchange_ratio("wood", "food"),
         }
-        return world_snapshot(self.sim.world, self.sim.agents, self.sim.recent_events, stats)
+        return world_snapshot(
+            self.sim.world, agents, self.sim.recent_events, stats,
+            self.sim.ecology.predators,
+        )
 
     def snapshot_json(self) -> bytes:
         with self._lock:

@@ -1,10 +1,10 @@
 """Builds the partial, egocentric view of the world handed to a policy.
 
 Agents never see global state. They receive only what is local and personal:
-their own vitals and inventory, nearby tiles, nearby agents, and a slice of
-their memory. This dict is both the input to the heuristic policy and the
-payload serialised into an LLM prompt, so the two policies reason over
-identical information.
+their own vitals and inventory, nearby tiles, nearby agents (including visible
+distress), nearby shelters and threats, the time of day, and a slice of their
+memory. This dict is both the input to the heuristic policy and the payload
+serialised into an LLM prompt, so the two policies reason over identical info.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ def build_observation(
     agent: Agent,
     agents: dict[str, Agent],
     interactions: Interactions | None = None,
+    predators: list | None = None,
 ) -> dict[str, Any]:
     here = world.tile(agent.pos)
     nearby_nodes = []
@@ -47,15 +48,30 @@ def build_observation(
                     "id": other.id,
                     "name": other.name,
                     "pos": list(other.pos),
+                    "health": other.health,   # visible distress
                     "trust": round(agent.relationships.get(other.id, 0.0), 2),
                 }
             )
+
+    nearby_shelters = []
+    for pos, s in world.structures.items():
+        if _chebyshev(pos, agent.pos) <= VISION_RADIUS:
+            nearby_shelters.append(
+                {"pos": list(pos), "owner": s.owner_id, "mine": s.owner_id == agent.id}
+            )
+
+    nearby_threats = []
+    for pred in predators or []:
+        if _chebyshev(pred.pos, agent.pos) <= VISION_RADIUS + 1:
+            nearby_threats.append({"pos": list(pred.pos), "dist": _chebyshev(pred.pos, agent.pos)})
 
     inbox = interactions.inbox.get(agent.id, []) if interactions else []
     offers = interactions.offers.get(agent.id, []) if interactions else []
 
     return {
         "tick": world.tick,
+        "time_of_day": world.time_of_day,
+        "is_night": world.is_night,
         "self": {
             "id": agent.id,
             "name": agent.name,
@@ -64,6 +80,7 @@ def build_observation(
             "energy": agent.energy,
             "health": agent.health,
             "goal": agent.goal,
+            "sheltered": world.shelter_at(agent.pos) is not None,
             "inventory": {r.value: n for r, n in agent.inventory.items()},
         },
         "on_tile_node": (
@@ -73,6 +90,8 @@ def build_observation(
         ),
         "nearby_nodes": nearby_nodes,
         "nearby_agents": nearby_agents,
+        "nearby_shelters": nearby_shelters,
+        "nearby_threats": nearby_threats,
         "recent_memory": [
             {"tick": e.tick, "kind": e.kind, "detail": e.detail}
             for e in list(agent.memory)[-6:]

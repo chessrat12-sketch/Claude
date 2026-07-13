@@ -27,6 +27,9 @@
   #feed .ev { padding:4px 8px; border-radius:6px; margin-bottom:4px; background:#111726; }
   #feed .trade { border-left:3px solid #4ea1ff; }
   #feed .speak { border-left:3px solid #ffd166; color:var(--muted); }
+  #feed .gift  { border-left:3px solid #5bbf6a; }
+  #feed .build { border-left:3px solid #c98b4b; }
+  #feed .attack{ border-left:3px solid #e0524a; color:#f0a9a3; }
   #status { font-size:11px; color:var(--muted); }
   #status.err { color:#ff6b6b; }
   .legend { display:flex; gap:12px; font-size:11px; color:var(--muted); }
@@ -44,6 +47,8 @@
       <span><i class="dot" style="background:#5bbf6a"></i>식량</span>
       <span><i class="dot" style="background:#9b6a3c"></i>나무</span>
       <span><i class="dot" style="background:#9aa3b2"></i>돌</span>
+      <span>🏠 은신처</span>
+      <span>🐺 포식자</span>
     </div>
     <div class="feedwrap">
       <h2>사건 (거래 · 대화)</h2>
@@ -60,7 +65,8 @@ let DPR = Math.min(window.devicePixelRatio || 1, 2);
 
 let snap = null;          // latest snapshot from server
 const drawn = new Map();  // id -> {x,y} interpolated screen-grid position
-const pulses = [];        // transient trade/speak visual pulses
+const pulses = [];        // transient trade/gift/speak visual pulses
+const flashes = new Map();// agent id -> remaining frames of "bitten" red flash
 const seenEvents = [];    // event feed history
 
 function resize() {
@@ -158,23 +164,47 @@ function roundRect(x,y,w,h,r){ ctx.beginPath();
   ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
   ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
 
+function drawHut(sx, sy) {
+  shadow(sx, sy+2, 14);
+  ctx.fillStyle = '#8a6a44';                          // walls
+  roundRect(sx-11, sy-14, 22, 16, 2); ctx.fill();
+  ctx.fillStyle = '#6d4a2d';                          // door
+  ctx.fillRect(sx-3, sy-6, 6, 8);
+  ctx.fillStyle = '#b4472e';                          // roof
+  ctx.beginPath(); ctx.moveTo(sx-14, sy-14); ctx.lineTo(sx, sy-26);
+  ctx.lineTo(sx+14, sy-14); ctx.closePath(); ctx.fill();
+}
+
+function drawWolf(sx, sy) {
+  shadow(sx, sy+1, 9);
+  ctx.fillStyle = '#3a3f4b';                          // body
+  roundRect(sx-8, sy-9, 16, 8, 3); ctx.fill();
+  ctx.beginPath(); ctx.arc(sx+8, sy-10, 4, 0, Math.PI*2); ctx.fill();  // head
+  ctx.fillStyle = '#e0524a';                          // glowing eyes
+  ctx.beginPath(); ctx.arc(sx+9, sy-11, 1.2, 0, Math.PI*2); ctx.fill();
+}
+
 // ---- main render loop -------------------------------------------------
 function render() {
   const cw = canvas.width/DPR, ch = canvas.height/DPR;
   ctx.setTransform(DPR,0,0,DPR,0,0);
   ctx.clearRect(0,0,cw,ch);
   if (!snap) { requestAnimationFrame(render); return; }
-  const W = snap.width, H = snap.height;
+  const W = snap.width, H = snap.height, night = !!snap.isNight;
 
-  // ground tiles (checker for a tidy village lawn)
+  // ground tiles (checker for a tidy village lawn; dusk-tinted at night)
+  const g1 = night? '#26424f' : '#3b7a4a', g2 = night? '#213a46' : '#357044';
+  const s1 = night? '#1c333c' : '#2c5c39', s2 = night? '#182b33' : '#284f33';
   for (let gx=0; gx<W; gx++) for (let gy=0; gy<H; gy++) {
     const {sx, sy} = iso(gx, gy, W, H, cw, ch);
     const light = (gx+gy)%2===0;
-    tileDiamond(sx, sy, light? '#3b7a4a' : '#357044', light? '#2c5c39' : '#284f33');
+    tileDiamond(sx, sy, light? g1 : g2, light? s1 : s2);
   }
-  // build render list (nodes + agents) sorted by depth (gx+gy)
+  // build render list (nodes + structures + threats + agents), depth-sorted
   const items = [];
   for (const n of snap.nodes) items.push({depth:n.x+n.y, kind:'node', o:n});
+  for (const s of (snap.structures||[])) items.push({depth:s.x+s.y+0.4, kind:'hut', o:s});
+  for (const t of (snap.threats||[])) items.push({depth:t.x+t.y+0.5, kind:'wolf', o:t});
   for (const a of snap.agents) {
     const d = drawn.get(a.id) || {x:a.x, y:a.y};
     d.x += (a.x - d.x)*0.2; d.y += (a.y - d.y)*0.2;  // smooth glide
@@ -184,16 +214,28 @@ function render() {
   items.sort((p,q)=>p.depth-q.depth);
   for (const it of items) {
     if (it.kind==='node') { const {sx,sy}=iso(it.o.x,it.o.y,W,H,cw,ch); drawNode(sx,sy,it.o); }
-    else { const {sx,sy}=iso(it.d.x,it.d.y,W,H,cw,ch); drawAgent(sx,sy,it.o); }
+    else if (it.kind==='hut') { const {sx,sy}=iso(it.o.x,it.o.y,W,H,cw,ch); drawHut(sx,sy); }
+    else if (it.kind==='wolf') { const {sx,sy}=iso(it.o.x,it.o.y,W,H,cw,ch); drawWolf(sx,sy); }
+    else {
+      const {sx,sy}=iso(it.d.x,it.d.y,W,H,cw,ch);
+      const flash = flashes.get(it.o.id);
+      if (flash>0) { ctx.save(); ctx.shadowColor='#ff5555'; ctx.shadowBlur=14; drawAgent(sx,sy,it.o); ctx.restore(); flashes.set(it.o.id, flash-1); }
+      else drawAgent(sx,sy,it.o);
+    }
   }
-  // trade/speak pulses (lines between two agents)
+  // interaction pulses (lines between two agents): trade blue, gift green, speak amber
+  const pulseColor = {trade:'78,161,255', gift:'91,191,106', speak:'255,209,102'};
   for (let i=pulses.length-1;i>=0;i--){
     const p=pulses[i]; p.life-=1; if(p.life<=0){pulses.splice(i,1);continue;}
     const A=drawn.get(p.a), B=drawn.get(p.b); if(!A||!B) continue;
     const s=iso(A.x,A.y,W,H,cw,ch), e=iso(B.x,B.y,W,H,cw,ch);
-    ctx.strokeStyle = p.type==='trade'? `rgba(78,161,255,${p.life/30})` : `rgba(255,209,102,${p.life/30})`;
+    ctx.strokeStyle = `rgba(${pulseColor[p.type]||'200,200,200'},${p.life/30})`;
     ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(s.sx,s.sy-10); ctx.lineTo(e.sx,e.sy-10); ctx.stroke();
   }
+  // night mood: darken the scene and hang a moon; day gets a warm sun
+  if (night) { ctx.fillStyle = 'rgba(20,28,55,0.34)'; ctx.fillRect(0,0,cw,ch); }
+  ctx.font = '22px system-ui'; ctx.textAlign='left';
+  ctx.fillText(night? '🌙' : '☀️', 18, 34);
   requestAnimationFrame(render);
 }
 requestAnimationFrame(render);
@@ -202,22 +244,27 @@ requestAnimationFrame(render);
 function renderStats(s) {
   const box = document.getElementById('stats');
   const cells = [
-    ['틱', s.tick ?? 0], ['생존', `${s.alive ?? 0}/${s.population ?? 0}`],
-    ['거래', s.trades ?? 0], ['대화', s.messages ?? 0],
-    ['지니(부의집중)', (s.gini ?? 0).toFixed(2)],
+    ['생존', `${s.alive ?? 0}/${s.population ?? 0}`],
+    ['사망', s.deaths ?? 0],
+    ['은신처', s.shelters ?? 0], ['도구', s.tools ?? 0],
+    ['거래', s.trades ?? 0], ['선물', s.gifts ?? 0],
+    ['동맹', s.alliances ?? 0], ['평균 신뢰', (s.meanTrust ?? 0).toFixed(2)],
+    ['포식자 공격', s.attacks ?? 0],
     ['가격 나무→식량', s.priceWoodForFood==null? '—' : s.priceWoodForFood],
   ];
   box.innerHTML = cells.map(([k,v])=>`<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
 }
+const EV_ICON = {trade:'🤝 ', speak:'💬 ', gift:'🎁 ', build:'🏠 ', attack:'🐺 '};
 function pushEvents(events) {
   const feed = document.getElementById('feed');
   for (const e of events) {
-    if (e.a && e.b) pulses.push({a:e.a, b:e.b, type:e.type, life:30});
+    if (e.type==='attack') { if (e.b) flashes.set(e.b, 8); }
+    else if (e.a && e.b) pulses.push({a:e.a, b:e.b, type:e.type, life:30});
     const div = document.createElement('div');
     div.className = 'ev ' + e.type;
-    div.textContent = (e.type==='trade'?'🤝 ':'💬 ') + (e.text||e.type);
+    div.textContent = (EV_ICON[e.type]||'• ') + (e.text||e.type);
     feed.prepend(div);
-    seenEvents.push(div); if (seenEvents.length>60) seenEvents.shift().remove();
+    seenEvents.push(div); if (seenEvents.length>80) seenEvents.shift().remove();
   }
 }
 

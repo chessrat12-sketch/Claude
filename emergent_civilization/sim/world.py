@@ -46,18 +46,45 @@ class Tile:
 
 
 @dataclass
+class Structure:
+    """A shelter raised by an agent. Protects occupants from night threats and
+    speeds rest. Ownership is recorded (the seed of property/territory) but the
+    shelter physically protects whoever stands on it."""
+
+    pos: tuple[int, int]
+    owner_id: str
+    built_tick: int
+    durability: int = 100
+
+
+@dataclass
 class World:
-    """A finite 2D grid. Movement is blocked at the edges (no wrap-around)."""
+    """A finite 2D grid with a day/night cycle. Edges block movement (no wrap)."""
 
     width: int
     height: int
     tiles: dict[tuple[int, int], Tile] = field(default_factory=dict)
+    structures: dict[tuple[int, int], Structure] = field(default_factory=dict)
     tick: int = 0
+    day_length: int = 24          # ticks per full day
+    night_fraction: float = 0.4   # the last 40% of each day is night
 
     def __post_init__(self) -> None:
         for x in range(self.width):
             for y in range(self.height):
                 self.tiles.setdefault((x, y), Tile(x, y))
+
+    # -- day / night ------------------------------------------------------
+    @property
+    def time_of_day(self) -> int:
+        return self.tick % self.day_length
+
+    @property
+    def is_night(self) -> bool:
+        return self.time_of_day >= self.day_length * (1 - self.night_fraction)
+
+    def shelter_at(self, pos: tuple[int, int]) -> Structure | None:
+        return self.structures.get(pos)
 
     # -- geometry ---------------------------------------------------------
     def in_bounds(self, pos: tuple[int, int]) -> bool:

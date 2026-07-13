@@ -19,14 +19,17 @@
 
 ## 현재 상태
 
-- ✅ **v0.1 생존 / v0.2 채집 / v0.3 거래·대화** — substrate + 대조군
-  (`HeuristicPolicy`) + 실험군(`LLMPolicy`, 백엔드 교체식) 구현.
-- ✅ **3D 시각화** — Python 서버가 월드 스냅샷을 스트리밍, 무설치 브라우저
-  뷰어와 Unity 3D "작은 마을"이 같은 계약을 소비.
-- ⏳ **v0.4 분업/제작** — 다음 단계 (→ `docs/07_roadmap.md`).
+- ✅ **v0.1–v0.4**: 생존 · 채집 · 거래/대화 · 분업/제작.
+- ✅ **살아있는 생태계**: 밤/포식자(위협), 은신처(주거), 도구(제작),
+  선물·신뢰(인간관계) — 서로 맞물린 유인 구조. → `docs/09_ecology.md`
+- ✅ **3D 시각화**: Python 서버가 월드 스냅샷을 스트리밍, 무설치 브라우저
+  뷰어와 Unity 3D "작은 마을"이 같은 계약을 소비(밤·포식자·은신처·이벤트).
+- ✅ **LLM 데모**: 관찰→프롬프트→모델→행동 배선과 `reason` 로그.
+  RunPod/NVIDIA/Anthropic 또는 오프라인 Mock 백엔드.
 
-오프라인 베이스라인 200틱에서 전원 생존, 거래 6건 성사, **창발 교환비
-나무→식량 ≈ 0.5**(설정한 적 없음, 거래에서 읽어냄), 지니 ≈ 0.30.
+핵심은 세계에 **위험과 필요**만 넣었다는 것이다 — "뭉쳐라·나눠라·거래하라"는
+지시는 없다. 베이스라인 200틱에서 은신처 6·도구 5·선물 6·동맹 1·평균신뢰
+0.43, 사망 5(포식자 4·기아 1): **위협 앞에서 협력이 창발**한다.
 
 ## 빠른 시작
 
@@ -34,11 +37,23 @@
 cd emergent_civilization
 
 # 1) 3D 마을 보기 — 서버 실행 후 브라우저에서 http://localhost:8000
-python -m server.viz_server
+python -m server.viz_server                 # 낮/밤·포식자·은신처가 실시간 렌더
 
-# 2) 헤드리스 데모 (의존성 0, 순수 표준 라이브러리)
+# 2) LLM 에이전트 추론 데모 (오프라인 Mock, 또는 env로 실제 모델)
+python -m examples.run_llm_agents
+
+# 3) 헤드리스 베이스라인 데모 + 테스트 (의존성 0, 순수 표준 라이브러리)
 python -m examples.run_v01_survival
-python tests/test_survival.py           # 테스트 (또는: pytest tests/)
+python tests/test_survival.py               # 15개 (또는: pytest tests/)
+```
+
+실제 LLM 연결:
+```bash
+# OpenAI 호환(RunPod vLLM / NVIDIA API)
+export EC_LLM_BASE_URL=... EC_LLM_MODEL=... EC_LLM_API_KEY=...
+# 또는 Anthropic
+export EC_LLM_API_KEY=<anthropic-key> EC_LLM_MODEL=claude-haiku-4-5-20251001
+python -m examples.run_llm_agents
 ```
 
 Unity 3D 클라이언트 설정은 `unity/README_UNITY.md` (5분), 시각화 구조는
@@ -73,9 +88,10 @@ emergent_civilization/
 │   ├── agent.py             # 신체·기억·성격·관계 (직업 없음)
 │   ├── actions.py           # 행동 실행·허용 (rules engine)
 │   ├── interactions.py      # 메시지·거래 제안 전송 계층 (v0.3)
+│   ├── ecology.py           # 밤·노출·포식자 (위협)
 │   ├── observation.py       # 부분·자기중심 관찰
 │   ├── policy.py            # Heuristic(대조) / LLM(실험)
-│   ├── llm_client.py        # LLM 백엔드 (Echo / OpenAICompat)
+│   ├── llm_client.py        # LLM 백엔드 (Mock/Echo/OpenAICompat/Anthropic)
 │   ├── metrics.py           # 창발 지표 수집·분석
 │   ├── snapshot.py          # 전역 렌더 스냅샷 (시각화 전용)
 │   └── engine.py            # 틱 루프
@@ -87,7 +103,8 @@ emergent_civilization/
 │   ├── Scripts/*.cs
 │   └── README_UNITY.md
 ├── examples/
-│   └── run_v01_survival.py  # 오프라인 생존·거래 데모
+│   ├── run_v01_survival.py  # 오프라인 베이스라인 데모(생태계 포함)
+│   └── run_llm_agents.py    # LLM 에이전트 추론(reason) 데모
 ├── tests/
 │   └── test_survival.py
 └── docs/
@@ -98,7 +115,8 @@ emergent_civilization/
     ├── 05_prompt_and_decision_loop.md # 프롬프트 설계·편향 통제
     ├── 06_metrics.md                  # 측정 항목
     ├── 07_roadmap.md                  # v0.1 → v1.0 로드맵
-    └── 08_visualization.md            # 시각화 (브라우저 + Unity)
+    ├── 08_visualization.md            # 시각화 (브라우저 + Unity)
+    └── 09_ecology.md                  # 생태계: 위협·주거·인간관계
 ```
 
 ## 실험 환경

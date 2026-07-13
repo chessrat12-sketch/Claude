@@ -57,6 +57,7 @@ class Agent:
     alive: bool = True
     born_tick: int = 0
     died_tick: int | None = None
+    cause_of_death: str | None = None
 
     inventory: dict[Resource, int] = field(default_factory=dict)
     # agent_id -> trust score in [-1, 1]; grows with kept promises, decays on
@@ -84,6 +85,20 @@ class Agent:
     def remember(self, tick: int, kind: str, detail: str) -> None:
         self.memory.append(MemoryEvent(tick, kind, detail))
 
+    def kill(self, tick: int, cause: str) -> None:
+        if not self.alive:
+            return
+        self.alive = False
+        self.died_tick = tick
+        self.cause_of_death = cause
+        self.remember(tick, "death", cause)
+
+    def hurt(self, tick: int, amount: int, cause: str) -> None:
+        """Apply external damage (e.g. a predator) and check for death."""
+        self.health = max(0, self.health - amount)
+        if self.health <= 0:
+            self.kill(tick, cause)
+
     # -- metabolism -------------------------------------------------------
     def metabolize(self, tick: int) -> None:
         """Apply passive survival dynamics for one tick."""
@@ -92,16 +107,15 @@ class Agent:
         self.hunger = min(MAX_VITAL, self.hunger + HUNGER_PER_TICK)
         self.energy = max(0, self.energy - ENERGY_PER_TICK)
 
-        stressed = self.hunger >= STARVING_HUNGER or self.energy <= EXHAUSTED_ENERGY
-        if stressed:
+        starving = self.hunger >= STARVING_HUNGER
+        exhausted = self.energy <= EXHAUSTED_ENERGY
+        if starving or exhausted:
             self.health = max(0, self.health - HEALTH_DECAY)
         elif self.hunger < 50 and self.energy > 40:
             self.health = min(MAX_VITAL, self.health + HEALTH_REGEN)
 
         if self.health <= 0:
-            self.alive = False
-            self.died_tick = tick
-            self.remember(tick, "death", "collapsed")
+            self.kill(tick, "starvation" if starving else "exhaustion")
 
     @property
     def wealth(self) -> int:

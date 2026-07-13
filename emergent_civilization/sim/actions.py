@@ -12,7 +12,7 @@ from __future__ import annotations
 from .agent import Agent
 from .interactions import Interactions, Message, Offer
 from .types import Action, ActionResult, ActionType, Direction, Resource
-from .world import World
+from .world import Structure, World
 
 # The milestone this build implements. Actions above this are parsed but
 # refused at execution time. Bump as the roadmap in docs/07_roadmap.md advances.
@@ -24,13 +24,23 @@ IMPLEMENTED_ACTIONS = {
     ActionType.IDLE,
     ActionType.SPEAK,
     ActionType.TRADE,
+    ActionType.GIVE,
+    ActionType.CRAFT,
+    ActionType.BUILD,
 }
 
 EAT_HUNGER_RELIEF = 35
 REST_ENERGY_GAIN = 30
+REST_SHELTER_BONUS = 15   # extra energy when resting inside a shelter
 GATHER_PER_ACTION = 3
-INTERACT_RADIUS = 2       # how close two agents must be to speak or trade
+GATHER_TOOL_BONUS = 2     # extra yield per gather when holding a tool
+INTERACT_RADIUS = 2       # how close two agents must be to speak, trade or give
 TRUST_ON_TRADE = 0.1      # trust each party gains from a completed exchange
+TRUST_ON_GIFT = 0.2       # trust the receiver gains toward a giver
+
+# Recipes (human-authored substrate; agents choose whether to use them).
+TOOL_RECIPE = {Resource.WOOD: 2, Resource.STONE: 1}      # -> 1 TOOL
+SHELTER_COST = {Resource.WOOD: 3, Resource.STONE: 1}     # -> 1 shelter on tile
 
 
 class ActionExecutor:
@@ -71,6 +81,9 @@ class ActionExecutor:
             ActionType.IDLE: self._idle,
             ActionType.SPEAK: self._speak,
             ActionType.TRADE: self._trade,
+            ActionType.GIVE: self._give,
+            ActionType.CRAFT: self._craft,
+            ActionType.BUILD: self._build,
         }[action.type]
         result = handler(agent, action)
         agent.remember(self.world.tick, action.type.value, result.message)
@@ -94,7 +107,8 @@ class ActionExecutor:
         tile = self.world.tile(agent.pos)
         if tile.node is None or tile.node.amount <= 0:
             return ActionResult(False, "nothing to gather here")
-        taken = tile.node.harvest(GATHER_PER_ACTION)
+        want = GATHER_PER_ACTION + (GATHER_TOOL_BONUS if agent.held(Resource.TOOL) else 0)
+        taken = tile.node.harvest(want)
         agent.add(tile.node.resource, taken)
         return ActionResult(
             True,
@@ -109,11 +123,64 @@ class ActionExecutor:
         return ActionResult(True, "ate 1 food", {"hunger": agent.hunger})
 
     def _rest(self, agent: Agent, _action: Action) -> ActionResult:
-        agent.energy = min(100, agent.energy + REST_ENERGY_GAIN)
-        return ActionResult(True, "rested", {"energy": agent.energy})
+        sheltered = self.world.shelter_at(agent.pos) is not None
+        gain = REST_ENERGY_GAIN + (REST_SHELTER_BONUS if sheltered else 0)
+        agent.energy = min(100, agent.energy + gain)
+        where = " in shelter" if sheltered else ""
+        return ActionResult(True, f"rested{where}", {"energy": agent.energy})
 
     def _idle(self, _agent: Agent, _action: Action) -> ActionResult:
         return ActionResult(True, "idled")
+
+    # -- craft / build / give ---------------------------------------------
+    def _craft(self, agent: Agent, _action: Action) -> ActionResult:
+        for resource, n in TOOL_RECIPE.items():
+            if agent.held(resource) < n:
+                return ActionResult(False, f"need {_fmt(TOOL_RECIPE)} to craft a tool")
+        for resource, n in TOOL_RECIPE.items():
+            agent.remove(resource, n)
+        agent.add(Resource.TOOL, 1)
+        return ActionResult(True, "crafted a tool", {"tools": agent.held(Resource.TOOL)})
+
+    def _build(self, agent: Agent, _action: Action) -> ActionResult:
+        if self.world.shelter_at(agent.pos) is not None:
+            return ActionResult(False, "a shelter already stands here")
+        for resource, n in SHELTER_COST.items():
+            if agent.held(resource) < n:
+                return ActionResult(False, f"need {_fmt(SHELTER_COST)} to build a shelter")
+        for resource, n in SHELTER_COST.items():
+            agent.remove(resource, n)
+        self.world.structures[agent.pos] = Structure(agent.pos, agent.id, self.world.tick)
+        self.events.append(
+            {"type": "build", "a": agent.id, "b": "",
+             "text": f"🏠 {agent.name} built a shelter at {agent.pos}"}
+        )
+        return ActionResult(True, f"built a shelter at {agent.pos}")
+
+    def _give(self, agent: Agent, action: Action) -> ActionResult:
+        recipient = self.agents.get(action.args.get("to"))
+        bundle = _parse_bundle(action.args.get("items") or action.args.get("give"))
+        if recipient is None or not recipient.alive:
+            return ActionResult(False, "no such recipient")
+        if _chebyshev(agent.pos, recipient.pos) > INTERACT_RADIUS:
+            return ActionResult(False, "too far to hand anything over")
+        if not bundle:
+            return ActionResult(False, "nothing to give")
+        for resource, n in bundle.items():
+            if agent.held(resource) < n:
+                return ActionResult(False, f"you lack {n} {resource.value} to give")
+        for resource, n in bundle.items():
+            agent.remove(resource, n)
+            recipient.add(resource, n)
+        # A gift builds the receiver's trust in the giver strongly, and warms
+        # the giver toward the receiver a little. Generosity earns reputation.
+        _bump_trust(recipient, agent.id, TRUST_ON_GIFT)
+        _bump_trust(agent, recipient.id, TRUST_ON_GIFT / 2)
+        self.events.append(
+            {"type": "gift", "a": agent.id, "b": recipient.id,
+             "text": f"🎁 {agent.name} → {recipient.name}: {_fmt(bundle)}"}
+        )
+        return ActionResult(True, f"gave {_fmt(bundle)} to {recipient.name}")
 
     # -- social handlers --------------------------------------------------
     def _speak(self, agent: Agent, action: Action) -> ActionResult:

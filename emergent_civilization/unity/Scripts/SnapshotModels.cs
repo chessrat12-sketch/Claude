@@ -38,8 +38,27 @@ namespace EmergentCivilization
         public int health;
         public bool alive;
         public int wealth;
+        public bool sheltered;
+        public int tools;
         public string lastAction;
         public InventoryEntry[] inventory;
+    }
+
+    [Serializable]
+    public class StructureView   // a shelter
+    {
+        public int x;
+        public int y;
+        public string owner;
+        public int durability;
+    }
+
+    [Serializable]
+    public class ThreatView      // a predator
+    {
+        public string id;
+        public int x;
+        public int y;
     }
 
     [Serializable]
@@ -59,7 +78,12 @@ namespace EmergentCivilization
         public int population;
         public int deaths;
         public int trades;
-        public int messages;
+        public int gifts;
+        public int shelters;
+        public int tools;
+        public int attacks;
+        public int alliances;
+        public float meanTrust;
         public float gini;
         // priceWoodForFood may be null in JSON; JsonUtility leaves it 0 then.
         public float priceWoodForFood;
@@ -71,7 +95,12 @@ namespace EmergentCivilization
         public int tick;
         public int width;
         public int height;
+        public int timeOfDay;
+        public int dayLength;
+        public bool isNight;
         public NodeView[] nodes;
+        public StructureView[] structures;
+        public ThreatView[] threats;
         public AgentView[] agents;
         public EventView[] events;
         public StatsView stats;

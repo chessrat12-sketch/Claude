@@ -22,6 +22,7 @@ class Metrics:
     # Population.
     alive_over_time: list[int] = field(default_factory=list)
     deaths: int = 0
+    deaths_by_cause: Counter = field(default_factory=Counter)
 
     # Activity (which action each agent takes — the raw signal for "did a
     # division of labour appear?").
@@ -34,6 +35,14 @@ class Metrics:
     # Economy (populated from v0.3 onward).
     trades: int = 0
     price_log: list[dict] = field(default_factory=list)
+
+    # Production & shelter (v0.4).
+    tools_crafted: int = 0
+    structures_built: int = 0
+    gifts: int = 0
+
+    # Threats (ecology).
+    predator_attacks: int = 0
 
     # Society scaffolding (rule proposals populated from v0.7 onward).
     messages: int = 0
@@ -53,6 +62,40 @@ class Metrics:
 
     def record_message(self) -> None:
         self.messages += 1
+
+    def record_event(self, ev: dict) -> None:
+        """Fold a social/ecology event into the right counter."""
+        kind = ev.get("type")
+        if kind == "trade":
+            self.record_trade(ev["give"], ev["receive"])
+        elif kind == "speak":
+            self.messages += 1
+        elif kind == "gift":
+            self.gifts += 1
+        elif kind == "build":
+            self.structures_built += 1
+        elif kind == "attack":
+            self.predator_attacks += 1
+
+    def record_death(self, cause: str) -> None:
+        self.deaths += 1
+        self.deaths_by_cause[cause or "unknown"] += 1
+
+    # -- relationships ----------------------------------------------------
+    def alliances(self, agents: dict[str, Agent], threshold: float = 0.3) -> int:
+        """Count mutually-trusting living pairs — the seed of alliances."""
+        living = [a for a in agents.values() if a.alive]
+        count = 0
+        for i, a in enumerate(living):
+            for b in living[i + 1:]:
+                if a.relationships.get(b.id, 0) >= threshold and \
+                        b.relationships.get(a.id, 0) >= threshold:
+                    count += 1
+        return count
+
+    def mean_trust(self, agents: dict[str, Agent]) -> float:
+        vals = [v for a in agents.values() for v in a.relationships.values()]
+        return round(statistics.mean(vals), 3) if vals else 0.0
 
     def mean_exchange_ratio(self, give_res: str, recv_res: str) -> float | None:
         """Average units of ``recv_res`` paid per unit of ``give_res``.
@@ -102,14 +145,21 @@ class Metrics:
             "ticks": world.tick,
             "alive": self.alive_over_time[-1] if self.alive_over_time else 0,
             "deaths": self.deaths,
+            "deaths_by_cause": dict(self.deaths_by_cause),
             "mean_survival_ticks": round(statistics.mean(survival_ticks), 1)
             if survival_ticks
             else 0,
             "action_counts": dict(self.action_counts),
             "gather_by_resource": dict(self.gather_by_resource),
+            "tools_crafted": self.tools_crafted,
+            "structures_built": self.structures_built,
+            "gifts": self.gifts,
+            "predator_attacks": self.predator_attacks,
             "trades": self.trades,
             "messages": self.messages,
             "price_wood_for_food": self.mean_exchange_ratio("wood", "food"),
+            "alliances": self.alliances(agents),
+            "mean_trust": self.mean_trust(agents),
             "wealth_gini": round(self.wealth_gini(agents), 3),
             "world_resources": {r.value: n for r, n in world.total_resources().items()},
             "roles": self.role_specialization(),
