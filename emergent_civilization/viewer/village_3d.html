@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Emergent Civilization — 3D Village</title>
+<style>
+  :root { --bg:#0f1420; --panel:#171d2b; --ink:#e7ecf5; --muted:#8b96ad; --line:#26304a; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family: ui-sans-serif, system-ui, "Helvetica Neue", Arial, sans-serif; overflow:hidden; }
+  #app { display:flex; height:100vh; }
+  #stage { flex:1; position:relative; }
+  #stage canvas { display:block; }
+  #hint { position:absolute; left:16px; bottom:14px; font-size:11px; color:rgba(231,236,245,.55);
+    background:rgba(10,14,24,.5); padding:6px 10px; border-radius:8px; pointer-events:none; }
+  #side { width:300px; flex:none; background:var(--panel); border-left:1px solid var(--line);
+    padding:16px; display:flex; flex-direction:column; gap:14px; overflow:hidden; }
+  h1 { font-size:15px; margin:0; letter-spacing:.02em; }
+  h1 small { color:var(--muted); font-weight:400; display:block; font-size:11px; margin-top:2px; }
+  .stats { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .stat { background:#111726; border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  .stat .k { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
+  .stat .v { font-size:20px; font-weight:650; margin-top:2px; font-variant-numeric:tabular-nums; }
+  .feedwrap { flex:1; min-height:0; display:flex; flex-direction:column; }
+  .feedwrap h2 { font-size:11px; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--muted); margin:0 0 6px; }
+  #feed { flex:1; overflow-y:auto; font-size:12px; line-height:1.5; }
+  #feed .ev { padding:4px 8px; border-radius:6px; margin-bottom:4px; background:#111726; }
+  #feed .trade { border-left:3px solid #4ea1ff; }
+  #feed .speak { border-left:3px solid #ffd166; color:var(--muted); }
+  #feed .gift  { border-left:3px solid #5bbf6a; }
+  #feed .build { border-left:3px solid #c98b4b; }
+  #feed .attack{ border-left:3px solid #e0524a; color:#f0a9a3; }
+  #status { font-size:11px; color:var(--muted); }
+  #status.err { color:#ff6b6b; }
+  .legend { display:flex; flex-wrap:wrap; gap:8px 12px; font-size:11px; color:var(--muted); }
+  .toplink { position:absolute; top:12px; right:16px; font-size:11px; }
+  .toplink a { color:#8fb4ff; text-decoration:none; background:rgba(10,14,24,.55);
+    padding:6px 10px; border-radius:8px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <div id="hint">좌드래그 회전 · 휠 줌 · 우드래그 이동</div>
+    <div class="toplink"><a href="/village.html">아이소메트릭 뷰로 전환 →</a></div>
+  </div>
+  <aside id="side">
+    <h1>Emergent Civilization<small>자율 AI 문명 — 3D 작은 마을</small></h1>
+    <div class="stats" id="stats"></div>
+    <div class="legend">
+      <span>🌳 식량/나무</span><span>🪨 돌</span><span>🏠 은신처</span><span>🐺 포식자</span>
+    </div>
+    <div class="feedwrap">
+      <h2>사건 (거래 · 선물 · 건축 · 공격)</h2>
+      <div id="feed"></div>
+    </div>
+    <div id="status">연결 중…</div>
+  </aside>
+</div>
+
+<script type="importmap">
+{ "imports": {
+    "three": "/vendor/three.module.min.js",
+    "three/addons/controls/OrbitControls.js": "/vendor/OrbitControls.js"
+} }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 500);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.minDistance = 4;
+controls.maxDistance = 80;
+
+const hemi = new THREE.HemisphereLight(0xbfd6ff, 0x223322, 0.9);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+sun.position.set(10, 18, 6);
+scene.add(sun);
+
+let W = 14, H = 14, groundMesh = null;
+function resize() {
+  const r = stage.getBoundingClientRect();
+  camera.aspect = r.width / r.height;
+  camera.updateProjectionMatrix();
+  renderer.setSize(r.width, r.height);
+}
+window.addEventListener('resize', resize);
+
+function buildGround(w, h) {
+  W = w; H = h;
+  if (groundMesh) scene.remove(groundMesh);
+  const geo = new THREE.PlaneGeometry(w, h, w, h);
+  geo.rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x3a7a48, roughness: 0.95 });
+  groundMesh = new THREE.Mesh(geo, mat);
+  groundMesh.position.set((w - 1) / 2, 0, (h - 1) / 2);
+  scene.add(groundMesh);
+
+  const grid = new THREE.GridHelper(Math.max(w, h), Math.max(w, h), 0x2c5c39, 0x2c5c39);
+  grid.position.set((w - 1) / 2, 0.01, (h - 1) / 2);
+  grid.material.opacity = 0.25; grid.material.transparent = true;
+  scene.add(grid);
+
+  const center = new THREE.Vector3((w - 1) / 2, 0, (h - 1) / 2);
+  camera.position.set(center.x + w * 0.8, w * 0.9, center.z + h * 1.1);
+  controls.target.copy(center);
+  controls.update();
+}
+buildGround(W, H);
+
+// ---- reusable geometries / materials -----------------------------------
+const G = {
+  trunk: new THREE.CylinderGeometry(0.06, 0.09, 0.45, 6),
+  leaf: new THREE.ConeGeometry(0.42, 0.85, 7),
+  berryLeaf: new THREE.SphereGeometry(0.4, 8, 8),
+  rock: new THREE.IcosahedronGeometry(0.4, 0),
+  hutBase: new THREE.BoxGeometry(0.85, 0.6, 0.85),
+  hutRoof: new THREE.ConeGeometry(0.72, 0.55, 4),
+  agentBody: new THREE.CapsuleGeometry(0.18, 0.34, 4, 8),
+  agentHead: new THREE.SphereGeometry(0.15, 10, 10),
+  wolfBody: new THREE.CapsuleGeometry(0.16, 0.32, 4, 8),
+};
+const M = {
+  trunk: new THREE.MeshStandardMaterial({ color: 0x7a5230, roughness: 0.9 }),
+  leafFood: new THREE.MeshStandardMaterial({ color: 0x5bbf6a, roughness: 0.8 }),
+  leafWood: new THREE.MeshStandardMaterial({ color: 0x3f7a43, roughness: 0.8 }),
+  rock: new THREE.MeshStandardMaterial({ color: 0x9aa3b2, roughness: 0.6, flatShading: true }),
+  hutWall: new THREE.MeshStandardMaterial({ color: 0x8a6a44, roughness: 0.9 }),
+  hutRoof: new THREE.MeshStandardMaterial({ color: 0xb4472e, roughness: 0.8 }),
+  wolfBody: new THREE.MeshStandardMaterial({ color: 0x2f333d, roughness: 0.7 }),
+  wolfEye: new THREE.MeshStandardMaterial({ color: 0xff3b30, emissive: 0x661111 }),
+};
+function agentMaterial(id) {
+  let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 360;
+  const col = new THREE.Color().setHSL(h / 360, 0.55, 0.55);
+  return new THREE.MeshStandardMaterial({ color: col, roughness: 0.6 });
+}
+function headMaterial(id) {
+  let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 360;
+  const col = new THREE.Color().setHSL(h / 360, 0.45, 0.78);
+  return new THREE.MeshStandardMaterial({ color: col, roughness: 0.6 });
+}
+
+function makeLabelSprite(text, scale = 0.9) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.font = '600 34px system-ui'; ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+  ctx.shadowColor = 'rgba(0,0,0,.9)'; ctx.shadowBlur = 6;
+  ctx.fillText(text, 128, 44);
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+  const sp = new THREE.Sprite(mat);
+  sp.scale.set(scale, scale * 0.25, 1);
+  sp.renderOrder = 10;
+  return sp;
+}
+
+function makeHealthBar() {
+  const group = new THREE.Group();
+  const bg = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.06),
+    new THREE.MeshBasicMaterial({ color: 0x000000, opacity: 0.5, transparent: true, depthTest: false }));
+  const fg = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.06),
+    new THREE.MeshBasicMaterial({ color: 0x5bbf6a, depthTest: false }));
+  fg.position.z = 0.001;
+  bg.renderOrder = 9; fg.renderOrder = 10;
+  group.add(bg, fg);
+  group.userData.fg = fg;
+  return group;
+}
+
+// ---- object pools --------------------------------------------------------
+const nodes = new Map();      // "x,y" -> Group
+const huts = new Map();       // "x,y" -> Group
+const wolves = new Map();     // id -> Group
+const agents = new Map();     // id -> {group, target, healthBar, label}
+
+function spawnNode(n) {
+  const g = new THREE.Group();
+  if (n.resource === 'stone') {
+    const rock = new THREE.Mesh(G.rock, M.rock);
+    rock.position.y = 0.35; rock.rotation.set(Math.random(), Math.random(), Math.random());
+    g.add(rock);
+  } else {
+    const trunk = new THREE.Mesh(G.trunk, M.trunk); trunk.position.y = 0.22;
+    const leafMat = n.resource === 'food' ? M.leafFood : M.leafWood;
+    const leaf = new THREE.Mesh(G.leaf, leafMat); leaf.position.y = 0.75;
+    g.add(trunk, leaf);
+  }
+  g.position.set(n.x, 0, n.y);
+  scene.add(g);
+  return g;
+}
+
+function spawnHut() {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(G.hutBase, M.hutWall); base.position.y = 0.3;
+  const roof = new THREE.Mesh(G.hutRoof, M.hutRoof); roof.position.y = 0.87; roof.rotation.y = Math.PI / 4;
+  g.add(base, roof);
+  scene.add(g);
+  return g;
+}
+
+function spawnWolf() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(G.wolfBody, M.wolfBody);
+  body.rotation.z = Math.PI / 2; body.position.y = 0.22;
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), M.wolfEye);
+  eye.position.set(0.22, 0.28, 0.08);
+  g.add(body, eye);
+  scene.add(g);
+  return g;
+}
+
+function spawnAgent(a) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(G.agentBody, agentMaterial(a.id)); body.position.y = 0.35;
+  const head = new THREE.Mesh(G.agentHead, headMaterial(a.id)); head.position.y = 0.62;
+  g.add(body, head);
+  const bar = makeHealthBar(); bar.position.y = 1.05; g.add(bar);
+  const label = makeLabelSprite(a.name); label.position.y = 1.25; g.add(label);
+  g.position.set(a.x, 0, a.y);
+  scene.add(g);
+  return { group: g, target: new THREE.Vector3(a.x, 0, a.y), healthBar: bar, label };
+}
+
+// bite flash: swap emissive briefly
+const flashUntil = new Map();
+function flashAgent(id) { flashUntil.set(id, performance.now() + 450); }
+
+function prune(pool, seenKeys) {
+  for (const [key, val] of pool) {
+    if (!seenKeys.has(key)) {
+      const obj = val.group || val;
+      scene.remove(obj);
+      pool.delete(key);
+    }
+  }
+}
+
+// ---- day/night ------------------------------------------------------------
+let bg = new THREE.Color();
+function applyDayNight(isNight) {
+  bg.set(isNight ? 0x0b1220 : 0x87b6ea);
+  scene.background = bg;
+  hemi.intensity = isNight ? 0.35 : 0.9;
+  sun.intensity = isNight ? 0.15 : 1.1;
+  sun.color.set(isNight ? 0x8fa6ff : 0xffffff);
+  scene.fog = new THREE.Fog(bg.getHex(), isNight ? 14 : 40, isNight ? 40 : 90);
+}
+
+// ---- apply a snapshot -------------------------------------------------
+let lastTick = -1;
+function applySnapshot(snap) {
+  if (snap.width !== W || snap.height !== H) buildGround(snap.width, snap.height);
+  applyDayNight(!!snap.isNight);
+
+  const seenNodes = new Set();
+  for (const n of snap.nodes) {
+    const key = `${n.x},${n.y}`; seenNodes.add(key);
+    if (!nodes.has(key)) nodes.set(key, spawnNode(n));
+    const fill = n.capacity > 0 ? n.amount / n.capacity : 1;
+    nodes.get(key).scale.setScalar(0.5 + 0.5 * fill);
+  }
+  prune(nodes, seenNodes);
+
+  const seenHuts = new Set();
+  for (const s of (snap.structures || [])) {
+    const key = `${s.x},${s.y}`; seenHuts.add(key);
+    if (!huts.has(key)) {
+      const g = spawnHut(); g.position.set(s.x, 0, s.y); huts.set(key, g);
+    }
+  }
+  prune(huts, seenHuts);
+
+  const seenWolves = new Set();
+  for (const t of (snap.threats || [])) {
+    seenWolves.add(t.id);
+    if (!wolves.has(t.id)) wolves.set(t.id, spawnWolf());
+    wolves.get(t.id).position.set(t.x, 0, t.y);
+  }
+  prune(wolves, seenWolves);
+
+  for (const a of snap.agents) {
+    if (!agents.has(a.id)) agents.set(a.id, spawnAgent(a));
+    const rec = agents.get(a.id);
+    rec.target.set(a.x, 0, a.y);
+    rec.group.visible = a.alive;
+    const t = Math.max(0, Math.min(1, a.health / 100));
+    rec.healthBar.userData.fg.scale.x = Math.max(0.02, t);
+    rec.healthBar.userData.fg.position.x = -0.25 * (1 - t);
+    rec.healthBar.userData.fg.material.color.setHSL(t > 0.5 ? 0.33 : t > 0.25 ? 0.13 : 0.0, 0.7, 0.5);
+  }
+
+  if (snap.tick !== lastTick) {
+    lastTick = snap.tick;
+    for (const e of (snap.events || [])) {
+      if (e.type === 'attack' && e.b) flashAgent(e.b);
+    }
+    pushEvents(snap.events || []);
+  }
+  renderStats(snap.stats || {});
+}
+
+// ---- animation loop -----------------------------------------------------
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  for (const [id, rec] of agents) {
+    rec.group.position.lerp(rec.target, 0.08);
+    // billboards for label/health bar face the camera
+    rec.label.quaternion.copy(camera.quaternion);
+    rec.healthBar.quaternion.copy(camera.quaternion);
+    const until = flashUntil.get(id);
+    const body = rec.group.children[0];
+    if (until && now < until) body.material.emissive?.setHex(0xff2222);
+    else body.material.emissive?.setHex(0x000000);
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+resize();
+animate();
+
+// ---- HUD + feed -----------------------------------------------------------
+function renderStats(s) {
+  const box = document.getElementById('stats');
+  const cells = [
+    ['생존', `${s.alive ?? 0}/${s.population ?? 0}`], ['사망', s.deaths ?? 0],
+    ['은신처', s.shelters ?? 0], ['도구', s.tools ?? 0],
+    ['거래', s.trades ?? 0], ['선물', s.gifts ?? 0],
+    ['동맹', s.alliances ?? 0], ['평균 신뢰', (s.meanTrust ?? 0).toFixed(2)],
+    ['포식자 공격', s.attacks ?? 0],
+    ['가격 나무→식량', s.priceWoodForFood == null ? '—' : s.priceWoodForFood],
+  ];
+  box.innerHTML = cells.map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+}
+const EV_ICON = { trade:'🤝 ', speak:'💬 ', gift:'🎁 ', build:'🏠 ', attack:'🐺 ' };
+const seenEvents = [];
+function pushEvents(events) {
+  const feed = document.getElementById('feed');
+  for (const e of events) {
+    const div = document.createElement('div');
+    div.className = 'ev ' + e.type;
+    div.textContent = (EV_ICON[e.type] || '• ') + (e.text || e.type);
+    feed.prepend(div);
+    seenEvents.push(div); if (seenEvents.length > 80) seenEvents.shift().remove();
+  }
+}
+
+// ---- polling ----------------------------------------------------------
+async function poll() {
+  const status = document.getElementById('status');
+  try {
+    const res = await fetch('/state', { cache: 'no-store' });
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    applySnapshot(data);
+    status.className = ''; status.textContent = `연결됨 · 틱 ${data.tick}`;
+  } catch (err) {
+    status.className = 'err';
+    status.textContent = '서버 대기 중… (python -m server.viz_server 실행)';
+  }
+}
+poll(); setInterval(poll, 300);
+</script>
+</body>
+</html>

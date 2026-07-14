@@ -1,15 +1,20 @@
 """Visualisation server: run the simulation live and stream world snapshots.
 
 Advances the simulation on a background thread at a fixed tick rate and exposes
-the latest render snapshot over HTTP. Both the bundled browser viewer and a
-Unity client consume the same ``GET /state`` endpoint, so the 3D village and the
-zero-setup web view show identical worlds.
+the latest render snapshot over HTTP. Three clients consume the same
+``GET /state`` endpoint and always show identical worlds:
+
+  * ``/``    a real 3D browser viewer (Three.js, orbit camera; vendored
+             locally under viewer/vendor/ so it works with no CDN/network)
+  * ``/iso`` a lightweight isometric-canvas viewer with zero dependencies
+  * Unity    ``unity/Scripts/SceneBootstrap.cs`` for a full 3D engine client
 
     python -m server.viz_server              # then open http://localhost:8000
     python -m server.viz_server --port 9000 --tick-ms 300 --agents 12
 
-Uses only the Python standard library (no framework, no extra deps). Swap the
-policy factory for ``LLMPolicy`` to visualise real LLM agents.
+The server itself uses only the Python standard library (no framework, no
+extra deps). Swap the policy factory for ``LLMPolicy`` to visualise real LLM
+agents.
 """
 
 from __future__ import annotations
@@ -29,7 +34,10 @@ NAMES = [
     "Aria", "Boaz", "Cira", "Doran", "Esme", "Finn", "Gwen", "Hodr", "Ivo",
     "Juno", "Kai", "Lena", "Milo", "Nadia", "Oren", "Pia", "Quin", "Rhea",
 ]
-VIEWER_HTML = os.path.join(os.path.dirname(os.path.dirname(__file__)), "viewer", "village.html")
+VIEWER_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "viewer")
+VIEWER_3D = os.path.join(VIEWER_DIR, "village_3d.html")   # real 3D (Three.js), default
+VIEWER_ISO = os.path.join(VIEWER_DIR, "village.html")     # isometric canvas, no-install
+VENDOR_DIR = os.path.join(VIEWER_DIR, "vendor")            # vendored three.js (no CDN)
 
 
 class LiveWorld:
@@ -114,17 +122,29 @@ def make_handler(live: LiveWorld):
             self.end_headers()
             self.wfile.write(body)
 
+        def _send_file(self, path: str, content_type: str = "text/html; charset=utf-8") -> None:
+            try:
+                with open(path, "rb") as fh:
+                    self._send(200, fh.read(), content_type)
+            except FileNotFoundError:
+                self._send(404, b"not found", "text/plain")
+
         def do_GET(self):  # noqa: N802
             if self.path.startswith("/state"):
                 self._send(200, live.snapshot_json(), "application/json")
             elif self.path == "/health":
                 self._send(200, b'{"ok":true}', "application/json")
-            elif self.path in ("/", "/index.html", "/village.html"):
-                try:
-                    with open(VIEWER_HTML, "rb") as fh:
-                        self._send(200, fh.read(), "text/html; charset=utf-8")
-                except FileNotFoundError:
-                    self._send(404, b"viewer not found", "text/plain")
+            elif self.path in ("/", "/index.html", "/3d", "/village_3d.html"):
+                self._send_file(VIEWER_3D)
+            elif self.path in ("/iso", "/village.html"):
+                self._send_file(VIEWER_ISO)
+            elif self.path.startswith("/vendor/"):
+                # Only serve the exact vendored filenames — no directory traversal.
+                name = self.path[len("/vendor/"):]
+                if name not in {"three.module.min.js", "OrbitControls.js"}:
+                    self._send(404, b"not found", "text/plain")
+                    return
+                self._send_file(os.path.join(VENDOR_DIR, name), "application/javascript")
             else:
                 self._send(404, b"not found", "text/plain")
 
@@ -146,6 +166,7 @@ def main() -> None:
     server = ThreadingHTTPServer(("0.0.0.0", args.port), make_handler(live))
     print(f"Emergent Civilization village live at http://localhost:{args.port}")
     print(f"  {args.agents} agents · {args.size}x{args.size} world · {args.tick_ms}ms/tick")
+    print("  3D view: /  (Three.js, orbit camera)   |   Isometric: /iso")
     print("  GET /state for the raw snapshot (Unity/other clients). Ctrl-C to stop.")
     try:
         server.serve_forever()

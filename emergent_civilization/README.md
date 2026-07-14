@@ -22,8 +22,9 @@
 - ✅ **v0.1–v0.4**: 생존 · 채집 · 거래/대화 · 분업/제작.
 - ✅ **살아있는 생태계**: 밤/포식자(위협), 은신처(주거), 도구(제작),
   선물·신뢰(인간관계) — 서로 맞물린 유인 구조. → `docs/09_ecology.md`
-- ✅ **3D 시각화**: Python 서버가 월드 스냅샷을 스트리밍, 무설치 브라우저
-  뷰어와 Unity 3D "작은 마을"이 같은 계약을 소비(밤·포식자·은신처·이벤트).
+- ✅ **3D 시각화**: Python 서버가 월드 스냅샷을 스트리밍. **진짜 3D 브라우저
+  뷰어**(Three.js, 궤도 카메라, 설치 불필요, 기본 `/`)· 가벼운 아이소메트릭
+  뷰(`/iso`) · Unity 3D(원클릭 부트스트랩)가 같은 계약을 소비.
 - ✅ **LLM 데모**: 관찰→프롬프트→모델→행동 배선과 `reason` 로그.
   RunPod/NVIDIA/Anthropic 또는 오프라인 Mock 백엔드.
 
@@ -36,8 +37,9 @@
 ```bash
 cd emergent_civilization
 
-# 1) 3D 마을 보기 — 서버 실행 후 브라우저에서 http://localhost:8000
-python -m server.viz_server                 # 낮/밤·포식자·은신처가 실시간 렌더
+# 1) 진짜 3D로 마을 보기 — 서버 실행 후 브라우저에서 http://localhost:8000
+python -m server.viz_server                 # 궤도 카메라(좌드래그 회전·휠 줌)
+                                             # 가벼운 2D 버전은 /iso
 
 # 2) LLM 에이전트 추론 데모 (오프라인 Mock, 또는 env로 실제 모델)
 python -m examples.run_llm_agents
@@ -98,7 +100,9 @@ emergent_civilization/
 ├── server/
 │   └── viz_server.py        # 라이브 시뮬레이션 + GET /state 스트리밍
 ├── viewer/
-│   └── village.html         # 무설치 아이소메트릭 마을 뷰어
+│   ├── village_3d.html       # 진짜 3D(Three.js) 뷰어 — 기본(/), 궤도 카메라
+│   ├── village.html          # 무설치 아이소메트릭 뷰어 — /iso
+│   └── vendor/                # 번들된 Three.js(CDN 미사용, 오프라인 동작)
 ├── unity/                   # Unity 3D 클라이언트 (C# + 설정 가이드)
 │   ├── Scripts/*.cs
 │   └── README_UNITY.md
