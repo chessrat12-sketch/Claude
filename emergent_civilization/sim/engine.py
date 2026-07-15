@@ -8,6 +8,7 @@ order is shuffled each tick so no agent has a permanent first-mover advantage.
 from __future__ import annotations
 
 import random
+import time
 from typing import Any, Callable
 
 from .actions import ActionExecutor
@@ -32,6 +33,7 @@ class Simulation:
         agents: list[Agent],
         policy_factory: PolicyFactory,
         seed: int | None = None,
+        decision_gap: float = 0.0,
     ) -> None:
         self.world = world
         self.agents: dict[str, Agent] = {a.id: a for a in agents}
@@ -45,6 +47,13 @@ class Simulation:
         self.recent_events: list[dict] = []
         self._dead: set[str] = set()
         self._rng = random.Random(seed)
+        # Seconds to sleep between each agent's decision within a tick. Zero
+        # for the offline/heuristic path (default); a live LLM run sets this
+        # so calls land one-at-a-time, evenly spaced, instead of bursting all
+        # agents back-to-back and then going silent for the rest of the tick.
+        # This is what actually controls calls-per-minute against a provider's
+        # rate limit — independent of agent count or --tick-ms.
+        self.decision_gap = decision_gap
 
     def step(self) -> None:
         # 1. Metabolism (may kill agents before they act).
@@ -56,7 +65,9 @@ class Simulation:
         order = [a for a in self.agents.values() if a.alive]
         self._rng.shuffle(order)
         predators = self.ecology.predators
-        for agent in order:
+        for i, agent in enumerate(order):
+            if i > 0 and self.decision_gap > 0:
+                time.sleep(self.decision_gap)
             obs = build_observation(
                 self.world, agent, self.agents, self.interactions, predators
             )

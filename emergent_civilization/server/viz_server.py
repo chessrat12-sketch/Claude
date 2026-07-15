@@ -18,51 +18,58 @@ the latest render snapshot over HTTP. Three clients consume the same
     # values once, and every future run picks them up automatically — no more
     # retyping `set`/`export` each session. See .env.example for the format.
     #
+    # --llm-gap-ms (default 8000) paces calls one-at-a-time instead of
+    # bursting all agents then going idle — this is what actually controls
+    # calls-per-minute against a provider's rate limit, independent of
+    # --agents. The default is safe for Groq's free tier; raise it for
+    # stricter limits, lower it for paid/high-limit APIs, or use 0 for local
+    # Ollama (no rate limit at all).
+    #
     # Or set them for just this session (any of these providers work). Pick one:
 
     # (a) Anthropic
     export EC_LLM_API_KEY=<anthropic-key>          # or ANTHROPIC_API_KEY
-    python -m server.viz_server --llm --agents 4 --tick-ms 2000
+    python -m server.viz_server --llm --agents 4 --llm-gap-ms 1000
 
     # (b) NVIDIA API Catalog (free tier) — build.nvidia.com
     export EC_LLM_BASE_URL=https://integrate.api.nvidia.com/v1
     export EC_LLM_MODEL=meta/llama-3.1-8b-instruct   # or any model you enabled
     export EC_LLM_API_KEY=<nvidia-key>
-    python -m server.viz_server --llm --agents 4 --tick-ms 2000
+    python -m server.viz_server --llm --agents 4
 
     # (c) Google Gemini (free tier, OpenAI-compatible endpoint) — aistudio.google.com/apikey
     export EC_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
     export EC_LLM_MODEL=gemini-2.0-flash
     export EC_LLM_API_KEY=<google-ai-studio-key>
-    python -m server.viz_server --llm --agents 4 --tick-ms 2000
+    python -m server.viz_server --llm --agents 4
 
     # (d) xAI Grok (OpenAI-compatible endpoint) — console.x.ai (needs billing/credits)
     export EC_LLM_BASE_URL=https://api.x.ai/v1
     export EC_LLM_MODEL=grok-2-latest        # check console.x.ai for the current name
     export EC_LLM_API_KEY=<xai-key>
-    python -m server.viz_server --llm --agents 4 --tick-ms 2000
+    python -m server.viz_server --llm --agents 4 --llm-gap-ms 1000
 
     # (e) Groq (free tier, no card required) — console.groq.com
     # Free-tier token-per-minute limits are tight (e.g. 6000 TPM on
-    # llama-3.1-8b-instant); use a slower tick or fewer agents, or you'll see
-    # "[llm] ...: HTTP 429 ... rate_limit_exceeded" and that agent idles.
+    # llama-3.1-8b-instant) — the default --llm-gap-ms 8000 is tuned for this.
     export EC_LLM_BASE_URL=https://api.groq.com/openai/v1
     export EC_LLM_MODEL=llama-3.1-8b-instant  # see console.groq.com/docs/models
     export EC_LLM_API_KEY=<groq-key>
-    python -m server.viz_server --llm --agents 2 --tick-ms 15000
+    python -m server.viz_server --llm --agents 4
 
     # (f) OpenRouter (":free"-tagged models, no card required) — openrouter.ai
-    # Free models are also rate-limited; start slow, same as Groq above.
+    # Free models are also rate-limited; the default gap applies here too.
     export EC_LLM_BASE_URL=https://openrouter.ai/api/v1
     export EC_LLM_MODEL=meta-llama/llama-3.1-8b-instruct:free  # see openrouter.ai/models?max_price=0
     export EC_LLM_API_KEY=<openrouter-key>
-    python -m server.viz_server --llm --agents 2 --tick-ms 15000
+    python -m server.viz_server --llm --agents 4
 
-    # (g) Fully local (Ollama) — no cloud, no key needed beyond a placeholder
+    # (g) Fully local (Ollama) — no cloud, no key needed beyond a placeholder,
+    # no rate limit (just your CPU/GPU speed), so turn pacing off:
     export EC_LLM_BASE_URL=http://localhost:11434/v1
-    export EC_LLM_MODEL=llama3.1
+    export EC_LLM_MODEL=llama3.2
     export EC_LLM_API_KEY=ollama
-    python -m server.viz_server --llm --agents 4 --tick-ms 3000
+    python -m server.viz_server --llm --agents 4 --llm-gap-ms 0
 
 The server itself uses only the Python standard library (no framework, no
 extra deps beyond an LLM API call when ``--llm`` is used).
@@ -103,7 +110,8 @@ class LiveWorld:
     """Owns the simulation and the latest snapshot behind a lock."""
 
     def __init__(
-        self, n_agents: int, size: int, tick_ms: int, seed: int, use_llm: bool = False
+        self, n_agents: int, size: int, tick_ms: int, seed: int,
+        use_llm: bool = False, llm_gap_ms: int = 0,
     ) -> None:
         self.tick_ms = tick_ms
         rng = random.Random(seed)
@@ -128,7 +136,10 @@ class LiveWorld:
             policy_factory = lambda a: LLMPolicy(a, backend)  # noqa: E731
         else:
             policy_factory = lambda a: HeuristicPolicy(a.personality)  # noqa: E731
-        self.sim = Simulation(world, agents, policy_factory=policy_factory, seed=seed)
+        self.sim = Simulation(
+            world, agents, policy_factory=policy_factory, seed=seed,
+            decision_gap=(llm_gap_ms / 1000.0) if use_llm else 0.0,
+        )
         self._lock = threading.Lock()
         self._snapshot = self._build_snapshot()
         self._running = True
@@ -227,24 +238,37 @@ def main() -> None:
         help="drive agents with a real LLM (needs EC_LLM_API_KEY/ANTHROPIC_API_KEY "
              "or EC_LLM_BASE_URL) instead of the heuristic baseline",
     )
+    parser.add_argument(
+        "--llm-gap-ms", type=int, default=8000,
+        help="milliseconds to wait between each agent's LLM call within a tick "
+             "(only used with --llm). Calls are spaced out evenly instead of "
+             "bursting all agents back-to-back then going idle — this is what "
+             "actually controls calls-per-minute against a provider's rate "
+             "limit, independent of --agents or --tick-ms. Default (8000ms, "
+             "~7.5 calls/min) stays under Groq's free-tier ~6000 TPM in the "
+             "worst case. Set lower for paid/high-limit APIs, or 0 for a "
+             "local Ollama server with no rate limit.",
+    )
     args = parser.parse_args()
 
     if _loaded_env:
         print(f"[env] loaded {_loaded_env}")
 
-    if args.llm and args.tick_ms < 1500:
-        print(f"[llm] note: {args.tick_ms}ms/tick is tight for API latency — each tick "
-              f"calls the model once per agent, one after another. Consider --tick-ms 2000+ "
-              f"and a small --agents count to keep it responsive and cheap.")
-    if args.llm and args.tick_ms < 10000 and args.agents > 2:
-        print(f"[llm] note: free-tier providers (Groq, OpenRouter, ...) often cap tokens "
-              f"per minute (e.g. 6000 TPM) — {args.agents} agents at {args.tick_ms}ms/tick can "
-              f"exceed that quickly and you'll see 'rate_limit_exceeded' in the log (that "
-              f"agent just idles that tick, it's not a crash). If you see it a lot, try "
-              f"--agents 2 --tick-ms 15000 or slower.")
+    if args.llm and args.llm_gap_ms > 0:
+        calls_per_min = 60000 / args.llm_gap_ms
+        print(f"[llm] pacing one call every {args.llm_gap_ms}ms "
+              f"(~{calls_per_min:.1f} calls/min total, regardless of --agents). "
+              f"Lower --llm-gap-ms for a faster/paid backend, or 0 for local Ollama.")
+    elif args.llm:
+        print("[llm] --llm-gap-ms 0: agents call back-to-back with no pacing — "
+              "fine for local Ollama or a high-limit paid API, but likely to hit "
+              "free-tier rate limits otherwise.")
 
     try:
-        live = LiveWorld(args.agents, args.size, args.tick_ms, args.seed, use_llm=args.llm)
+        live = LiveWorld(
+            args.agents, args.size, args.tick_ms, args.seed,
+            use_llm=args.llm, llm_gap_ms=args.llm_gap_ms,
+        )
     except (RuntimeError, ValueError) as e:
         raise SystemExit(f"error: {e}")
 
