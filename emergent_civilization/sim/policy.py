@@ -226,10 +226,15 @@ class LLMPolicy:
         # pretty-printing, which matters a lot on free-tier token-per-minute
         # limits (e.g. Groq's free tier) when several agents call every tick.
         obs_json = json.dumps(obs, ensure_ascii=False, separators=(",", ":"))
+        # "/no_think" is Qwen3's documented switch to skip its extended
+        # <think>...</think> reasoning trace and answer directly. Harmless
+        # stray text to any other model. Without it, Qwen3 can spend the
+        # whole output budget "thinking" and get truncated before ever
+        # emitting the action JSON (-> "unparseable model output").
         return (
             f"{SYSTEM_INSTRUCTIONS}\n\n{persona}\n\n"
             f"Current observation:\n{obs_json}\n\n"
-            "Your action:"
+            "Your action: /no_think"
         )
 
     def decide(self, obs: dict[str, Any]) -> Action:

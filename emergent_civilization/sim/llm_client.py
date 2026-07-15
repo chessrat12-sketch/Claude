@@ -240,7 +240,7 @@ class OpenAICompatBackend:
         model: str | None = None,
         api_key: str | None = None,
         temperature: float = 0.8,
-        max_tokens: int = 150,
+        max_tokens: int | None = None,
         timeout: float = 60.0,
     ) -> None:
         self.base_url = (base_url or os.environ.get("EC_LLM_BASE_URL", "")).rstrip("/")
@@ -248,7 +248,16 @@ class OpenAICompatBackend:
         raw_key = api_key or os.environ.get("EC_LLM_API_KEY", "")
         self.api_key = _sanitize_header_value("EC_LLM_API_KEY", raw_key)
         self.temperature = temperature
-        self.max_tokens = max_tokens
+        # Default (150) is tuned for free-tier token-per-minute budgets. Some
+        # models (e.g. Qwen3's "thinking" mode) spend a chunk of the output
+        # budget on reasoning text before ever emitting the action JSON, and
+        # can get truncated mid-thought at 150 (-> "unparseable model output").
+        # Override with EC_LLM_MAX_TOKENS for those, since a private/paid
+        # backend doesn't have the same TPM pressure a free tier does.
+        self.max_tokens = (
+            max_tokens if max_tokens is not None
+            else int(os.environ.get("EC_LLM_MAX_TOKENS", "150"))
+        )
         # Generous default: local CPU inference (Ollama/LM Studio) can be much
         # slower per call than a hosted API.
         self.timeout = timeout
