@@ -94,6 +94,7 @@ class AnthropicBackend:
         self.temperature = temperature
 
     def complete(self, prompt: str) -> str:
+        import urllib.error
         import urllib.request
 
         payload = json.dumps(
@@ -113,8 +114,12 @@ class AnthropicBackend:
                 "anthropic-version": "2023-06-01",
             },
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            body = json.loads(resp.read())
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                body = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"HTTP {e.code} from {self.base_url}: {detail}") from e
         return body["content"][0]["text"]
 
 
@@ -209,6 +214,7 @@ class OpenAICompatBackend:
         self.timeout = timeout
 
     def complete(self, prompt: str) -> str:
+        import urllib.error
         import urllib.request  # stdlib, avoids a hard dependency
 
         payload = json.dumps(
@@ -227,6 +233,12 @@ class OpenAICompatBackend:
                 "Authorization": f"Bearer {self.api_key}",
             },
         )
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            body = json.loads(resp.read())
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                body = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            # Surface the provider's actual error text (e.g. "invalid API key",
+            # "model not found") instead of a bare "HTTP Error 400".
+            detail = e.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"HTTP {e.code} from {self.base_url}: {detail}") from e
         return body["choices"][0]["message"]["content"]

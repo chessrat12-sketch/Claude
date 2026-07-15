@@ -231,7 +231,11 @@ class LLMPolicy:
         )
 
     def decide(self, obs: dict[str, Any]) -> Action:
-        raw = self.backend.complete(self.build_prompt(obs))
+        try:
+            raw = self.backend.complete(self.build_prompt(obs))
+        except Exception as e:  # noqa: BLE001 — a bad response must never crash the sim
+            print(f"[llm] {self.agent.name}: backend error, idling this tick — {e}")
+            return Action(ActionType.IDLE, reason=f"backend error: {e}")
         return parse_action(raw)
 
 
