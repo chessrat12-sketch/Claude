@@ -71,6 +71,17 @@ the latest render snapshot over HTTP. Three clients consume the same
     export EC_LLM_API_KEY=ollama
     python -m server.viz_server --llm --agents 4 --llm-gap-ms 0
 
+    # (h) RunPod — your own GPU, no shared rate limit -> real 100-agent scale.
+    # Deploy vLLM's OpenAI-compatible server on a RunPod Pod or Serverless
+    # endpoint (e.g. the vllm/vllm-openai Docker image), which gives you a
+    # /v1 URL like https://<pod-id>-8000.proxy.runpod.net/v1. Unlike a shared
+    # free tier, YOUR pod can actually take concurrent requests — so use
+    # --llm-concurrency instead of --llm-gap-ms to run many agents at once:
+    export EC_LLM_BASE_URL=https://<pod-id>-8000.proxy.runpod.net/v1
+    export EC_LLM_MODEL=<model you deployed, e.g. meta-llama/Llama-3.1-8B-Instruct>
+    export EC_LLM_API_KEY=<runpod key, or any placeholder if your pod has none>
+    python -m server.viz_server --llm --agents 100 --size 32 --llm-concurrency 20
+
 The server itself uses only the Python standard library (no framework, no
 extra deps beyond an LLM API call when ``--llm`` is used).
 """
@@ -111,17 +122,21 @@ class LiveWorld:
 
     def __init__(
         self, n_agents: int, size: int, tick_ms: int, seed: int,
-        use_llm: bool = False, llm_gap_ms: int = 0,
+        use_llm: bool = False, llm_gap_ms: int = 0, llm_concurrency: int = 1,
     ) -> None:
         self.tick_ms = tick_ms
         rng = random.Random(seed)
         world = make_scattered_world(width=size, height=size, density=0.20, seed=seed)
         agents = []
         for i in range(n_agents):
+            # Cycle names, appending a number past the name list's length so
+            # e.g. 100 agents stay individually identifiable ("Aria", "Aria2").
+            cycle = i // len(NAMES)
+            name = NAMES[i % len(NAMES)] + (str(cycle + 1) if cycle else "")
             agents.append(
                 Agent(
                     id=f"a{i}",
-                    name=NAMES[i % len(NAMES)],
+                    name=name,
                     pos=(rng.randrange(size), rng.randrange(size)),
                     personality=Personality(
                         greed=rng.random(), sociability=rng.random(),
@@ -139,6 +154,7 @@ class LiveWorld:
         self.sim = Simulation(
             world, agents, policy_factory=policy_factory, seed=seed,
             decision_gap=(llm_gap_ms / 1000.0) if use_llm else 0.0,
+            max_concurrency=llm_concurrency if use_llm else 1,
         )
         self._lock = threading.Lock()
         self._snapshot = self._build_snapshot()
@@ -240,25 +256,43 @@ def main() -> None:
     )
     parser.add_argument(
         "--llm-gap-ms", type=int, default=8000,
-        help="milliseconds to wait between each agent's LLM call within a tick "
-             "(only used with --llm). Calls are spaced out evenly instead of "
-             "bursting all agents back-to-back then going idle — this is what "
-             "actually controls calls-per-minute against a provider's rate "
-             "limit, independent of --agents or --tick-ms. Default (8000ms, "
-             "~7.5 calls/min) stays under Groq's free-tier ~6000 TPM in the "
-             "worst case. Set lower for paid/high-limit APIs, or 0 for a "
-             "local Ollama server with no rate limit.",
+        help="milliseconds to wait between each agent's LLM call (only used "
+             "with --llm, and ignored if --llm-concurrency > 1). Calls are "
+             "spaced out evenly instead of bursting all agents back-to-back "
+             "then going idle — this is what actually controls "
+             "calls-per-minute against a shared rate limit, independent of "
+             "--agents or --tick-ms. Default (8000ms, ~7.5 calls/min) stays "
+             "under Groq's free-tier ~6000 TPM in the worst case. Set lower "
+             "for paid/high-limit APIs, or 0 for a local Ollama server.",
+    )
+    parser.add_argument(
+        "--llm-concurrency", type=int, default=1,
+        help="number of agents that can call the LLM at once, instead of one "
+             "at a time (--llm-gap-ms is ignored when this is > 1). Only "
+             "meaningful against a backend built to handle concurrent load, "
+             "e.g. your own RunPod vLLM deployment — a shared free-tier API "
+             "has no extra headroom to unlock this way, so keep it at 1 "
+             "there. This is what makes large agent counts (dozens to "
+             "hundreds) practical: with concurrency 20, 100 agents decide in "
+             "roughly the time 5 would take one at a time.",
     )
     args = parser.parse_args()
 
     if _loaded_env:
         print(f"[env] loaded {_loaded_env}")
 
-    if args.llm and args.llm_gap_ms > 0:
+    if args.llm and args.llm_concurrency > 1:
+        print(f"[llm] concurrency {args.llm_concurrency}: up to that many agents "
+              f"decide at once against a shared start-of-tick snapshot, then act "
+              f"in order. --llm-gap-ms is ignored. Make sure your backend can "
+              f"actually take this many requests at once (a private RunPod "
+              f"deployment can; a shared free-tier API generally can't).")
+    elif args.llm and args.llm_gap_ms > 0:
         calls_per_min = 60000 / args.llm_gap_ms
         print(f"[llm] pacing one call every {args.llm_gap_ms}ms "
               f"(~{calls_per_min:.1f} calls/min total, regardless of --agents). "
-              f"Lower --llm-gap-ms for a faster/paid backend, or 0 for local Ollama.")
+              f"Lower --llm-gap-ms for a faster/paid backend, or use "
+              f"--llm-concurrency instead against a backend built for it.")
     elif args.llm:
         print("[llm] --llm-gap-ms 0: agents call back-to-back with no pacing — "
               "fine for local Ollama or a high-limit paid API, but likely to hit "
@@ -268,6 +302,7 @@ def main() -> None:
         live = LiveWorld(
             args.agents, args.size, args.tick_ms, args.seed,
             use_llm=args.llm, llm_gap_ms=args.llm_gap_ms,
+            llm_concurrency=args.llm_concurrency,
         )
     except (RuntimeError, ValueError) as e:
         raise SystemExit(f"error: {e}")

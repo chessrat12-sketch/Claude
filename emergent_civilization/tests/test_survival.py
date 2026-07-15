@@ -7,7 +7,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sim import Agent, HeuristicPolicy, Simulation, World
+from sim import Agent, HeuristicPolicy, LLMPolicy, Simulation, World
 from sim.actions import ActionExecutor
 from sim.agent import MAX_VITAL
 from sim.policy import parse_action
@@ -205,6 +205,44 @@ def test_simulation_runs_and_survivors_remain():
     # the world's survival dynamics are unsolvable and need retuning.
     assert summary["alive"] >= 1
     assert summary["action_counts"]
+
+
+def test_concurrent_decisions_resolve_correctly_and_speed_up():
+    import time
+
+    class SlowBackend:
+        def complete(self, _prompt):
+            time.sleep(0.05)
+            return '{"action": "idle", "reason": "thinking"}'
+
+    world = make_scattered_world(10, 10, 0.2, seed=1)
+    agents = [Agent(id=f"a{i}", name=f"A{i}", pos=(i % 10, i % 10)) for i in range(10)]
+    # A private high-throughput backend (e.g. RunPod vLLM) can take many
+    # requests at once, so all 10 agents should decide roughly in parallel
+    # rather than one at a time.
+    sim = Simulation(
+        world, agents, lambda a: LLMPolicy(a, SlowBackend()), seed=1, max_concurrency=10
+    )
+    t0 = time.time()
+    sim.step()
+    elapsed = time.time() - t0
+    # Sequential would take ~10 * 0.05s = 0.5s; concurrent should be close to
+    # one call's worth. Generous bound to avoid CI flakiness.
+    assert elapsed < 0.3, f"concurrency did not speed things up: {elapsed:.2f}s"
+    # Every agent still got a resolved action and a visible "thought" event.
+    assert sim.metrics.action_counts.get("idle", 0) == 10
+    assert len([e for e in sim.recent_events if e["type"] == "thought"]) == 10
+
+
+def test_thought_events_carry_the_agents_stated_reason():
+    world = World(3, 3)
+    agent = Agent(id="a", name="A", pos=(1, 1))
+    sim = Simulation(world, [agent], lambda a: HeuristicPolicy(a.personality), seed=1)
+    sim.step()
+    thoughts = [e for e in sim.recent_events if e["type"] == "thought"]
+    assert len(thoughts) == 1
+    assert thoughts[0]["a"] == "a"
+    assert "A:" in thoughts[0]["text"]
 
 
 if __name__ == "__main__":
