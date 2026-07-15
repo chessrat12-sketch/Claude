@@ -43,9 +43,14 @@ Unity에서 3D로 렌더링한다. **Unity는 순수 프레젠테이션 계층�
 ## 연결이 안 될 때 (체크리스트)
 - Console에 `SimClient` 오류 → **서버가 실행 중인지** 먼저 확인
   (`python -m server.viz_server`, 브라우저로 http://localhost:8000 열어보기).
-- 아무것도 안 보임 → `World Size` 가 서버 `--size` 와 같은지, Scene 뷰가 아니라
+- 아무것도 안 보임 → `World Size` 가 서버 `--size`(또는 서버 콘솔에 뜬
+  `[world] auto-sized to NxN...` 값)와 같은지, Scene 뷰가 아니라
   **Game 뷰**를 보고 있는지 확인.
 - 원격 서버라면 `Server Url` 을 해당 호스트로. (localhost 는 같은 PC 기준.)
+- `InvalidOperationException: ... Input System package` 에러 → `CameraOrbit.cs`
+  가 새 Input System 패키지도 자동 지원하도록 돼 있어 보통은 그냥 해결된다.
+  그래도 계속 뜨면: **Edit → Project Settings → Player → Other Settings →
+  Active Input Handling** 을 `Both` 로 바꾸고 에디터 재시작.
 
 ## 좌표 규약
 - 월드 1칸 = Unity 1 유닛. 노드/에이전트는 `(x, 0.5, y)` 에 배치된다.
