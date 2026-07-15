@@ -30,7 +30,13 @@ the latest render snapshot over HTTP. Three clients consume the same
     export EC_LLM_API_KEY=<google-ai-studio-key>
     python -m server.viz_server --llm --agents 4 --tick-ms 2000
 
-    # (d) Fully local (Ollama) — no cloud, no key needed beyond a placeholder
+    # (d) xAI Grok (OpenAI-compatible endpoint) — console.x.ai
+    export EC_LLM_BASE_URL=https://api.x.ai/v1
+    export EC_LLM_MODEL=grok-2-latest        # check console.x.ai for the current name
+    export EC_LLM_API_KEY=<xai-key>
+    python -m server.viz_server --llm --agents 4 --tick-ms 2000
+
+    # (e) Fully local (Ollama) — no cloud, no key needed beyond a placeholder
     export EC_LLM_BASE_URL=http://localhost:11434/v1
     export EC_LLM_MODEL=llama3.1
     export EC_LLM_API_KEY=ollama
