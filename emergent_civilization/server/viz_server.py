@@ -80,7 +80,8 @@ the latest render snapshot over HTTP. Three clients consume the same
     export EC_LLM_BASE_URL=https://<pod-id>-8000.proxy.runpod.net/v1
     export EC_LLM_MODEL=<model you deployed, e.g. meta-llama/Llama-3.1-8B-Instruct>
     export EC_LLM_API_KEY=<runpod key, or any placeholder if your pod has none>
-    python -m server.viz_server --llm --agents 100 --size 32 --llm-concurrency 20
+    python -m server.viz_server --llm --agents 100 --llm-concurrency 20
+    # (world auto-sizes to ~45x45 for 100 agents; pass --size to override)
 
 The server itself uses only the Python standard library (no framework, no
 extra deps beyond an LLM API call when ``--llm`` is used).
@@ -90,6 +91,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import random
 import threading
@@ -246,7 +248,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Emergent Civilization viz server")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--agents", type=int, default=10)
-    parser.add_argument("--size", type=int, default=14)
+    parser.add_argument(
+        "--size", type=int, default=None,
+        help="world width/height (square). If omitted, scales automatically "
+             "with --agents to hold the original 10-agent/14x14 tuning's "
+             "density (~20 tiles, ~4 resource tiles per agent) — 100 agents "
+             "gets a ~45x45 world, not a cramped 14x14. Pass explicitly to "
+             "override (smaller = more competition/crowding, larger = more "
+             "room to roam and fewer chance encounters).",
+    )
     parser.add_argument("--tick-ms", type=int, default=400, help="ms between ticks")
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument(
@@ -277,6 +287,16 @@ def main() -> None:
              "roughly the time 5 would take one at a time.",
     )
     args = parser.parse_args()
+
+    if args.size is None:
+        # Same tiles-per-agent ratio as the tuned 10-agent/14x14 default
+        # (196 tiles / 10 agents = 19.6/agent), so density — and with it
+        # survival difficulty, encounter frequency, competition — doesn't
+        # silently change just because --agents did.
+        args.size = max(10, math.ceil(math.sqrt(args.agents * 19.6)))
+        print(f"[world] auto-sized to {args.size}x{args.size} for {args.agents} agents "
+              f"(~20 tiles/agent, same density as the original 10-agent default). "
+              f"Pass --size to override.")
 
     if _loaded_env:
         print(f"[env] loaded {_loaded_env}")
