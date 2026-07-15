@@ -30,6 +30,7 @@
   #feed .gift  { border-left:3px solid #5bbf6a; }
   #feed .build { border-left:3px solid #c98b4b; }
   #feed .attack{ border-left:3px solid #e0524a; color:#f0a9a3; }
+  #feed .thought{ border-left:3px solid #6c7a94; color:var(--muted); font-style:italic; }
   #status { font-size:11px; color:var(--muted); }
   #status.err { color:#ff6b6b; }
   .legend { display:flex; gap:12px; font-size:11px; color:var(--muted); }
@@ -255,7 +256,7 @@ function renderStats(s) {
   ];
   box.innerHTML = cells.map(([k,v])=>`<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
 }
-const EV_ICON = {trade:'🤝 ', speak:'💬 ', gift:'🎁 ', build:'🏠 ', attack:'🐺 '};
+const EV_ICON = {trade:'🤝 ', speak:'💬 ', gift:'🎁 ', build:'🏠 ', attack:'🐺 ', thought:'💭 '};
 function pushEvents(events) {
   const feed = document.getElementById('feed');
   for (const e of events) {

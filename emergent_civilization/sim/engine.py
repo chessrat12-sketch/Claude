@@ -47,13 +47,22 @@ class Simulation:
         self.recent_events: list[dict] = []
         self._dead: set[str] = set()
         self._rng = random.Random(seed)
-        # Seconds to sleep between each agent's decision within a tick. Zero
-        # for the offline/heuristic path (default); a live LLM run sets this
-        # so calls land one-at-a-time, evenly spaced, instead of bursting all
-        # agents back-to-back and then going silent for the rest of the tick.
-        # This is what actually controls calls-per-minute against a provider's
-        # rate limit — independent of agent count or --tick-ms.
+        # Minimum seconds between the *start* of one agent's decision and the
+        # next — across the whole run, not just within one tick. Zero for the
+        # offline/heuristic path (default); a live LLM run sets this so calls
+        # land one-at-a-time, evenly spaced, instead of bursting all agents
+        # back-to-back and then going silent for the rest of the tick. This is
+        # what actually controls calls-per-minute against a provider's rate
+        # limit — independent of agent count or --tick-ms.
+        #
+        # Enforced by timestamp rather than a flat sleep-every-call: the wait
+        # is `decision_gap` minus whatever time already elapsed (including the
+        # previous call's own latency and the tick's world-processing time),
+        # so a slow API call is credited toward the gap instead of the gap
+        # being added on top of it. Tracking runs across tick boundaries too,
+        # so the pacing holds even at the seam between one step() and the next.
         self.decision_gap = decision_gap
+        self._last_decision_time: float | None = None
 
     def step(self) -> None:
         # 1. Metabolism (may kill agents before they act).
@@ -65,9 +74,19 @@ class Simulation:
         order = [a for a in self.agents.values() if a.alive]
         self._rng.shuffle(order)
         predators = self.ecology.predators
-        for i, agent in enumerate(order):
-            if i > 0 and self.decision_gap > 0:
-                time.sleep(self.decision_gap)
+        # "thought" events — the agent's chosen action plus its own stated
+        # reason, if any. Not used for anything mechanical; this is purely so
+        # a human watching can see *why* an agent did what it did (the
+        # research design's qualitative evidence trail — see
+        # docs/05_prompt_and_decision_loop.md).
+        thought_events: list[dict] = []
+        for agent in order:
+            if self.decision_gap > 0:
+                if self._last_decision_time is not None:
+                    wait = self.decision_gap - (time.monotonic() - self._last_decision_time)
+                    if wait > 0:
+                        time.sleep(wait)
+                self._last_decision_time = time.monotonic()
             obs = build_observation(
                 self.world, agent, self.agents, self.interactions, predators
             )
@@ -79,12 +98,16 @@ class Simulation:
                 self.metrics.record_gather(result.data["resource"], result.data["amount"])
             elif result.ok and action.type == ActionType.CRAFT:
                 self.metrics.tools_crafted += 1
+            text = f"{agent.name}: {action.type.value}"
+            if action.reason:
+                text += f" — {action.reason}"
+            thought_events.append({"type": "thought", "a": agent.id, "b": "", "text": text})
 
         # 3. Ecology: night, exposure, predators (can kill agents).
         eco_events = self.ecology.update(self.world, self.agents, self._rng)
 
         # 4. Drain events into metrics + record any new deaths with their cause.
-        self.recent_events = list(self.executor.events) + eco_events
+        self.recent_events = thought_events + list(self.executor.events) + eco_events
         for ev in self.recent_events:
             self.metrics.record_event(ev)
         for agent in self.agents.values():

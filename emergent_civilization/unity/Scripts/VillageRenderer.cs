@@ -223,7 +223,8 @@ namespace EmergentCivilization
         private static string Icon(string type) => type switch
         {
             "trade" => "\U0001F91D ", "gift" => "\U0001F381 ", "build" => "\U0001F3E0 ",
-            "attack" => "\U0001F43A ", "speak" => "\U0001F4AC ", _ => "" };
+            "attack" => "\U0001F43A ", "speak" => "\U0001F4AC ", "thought" => "\U0001F4AD ",
+            _ => "" };
 
         private void FloatingLabel(Vector3 pos, string text)
         {
