@@ -142,7 +142,9 @@ def pick_backend_from_env(*, allow_mock: bool = True) -> LLMBackend:
     raise RuntimeError(
         "No LLM credentials found. Set EC_LLM_API_KEY (or ANTHROPIC_API_KEY) to use "
         "Anthropic, or EC_LLM_BASE_URL (+ EC_LLM_MODEL, EC_LLM_API_KEY) for an "
-        "OpenAI-compatible endpoint (RunPod vLLM / NVIDIA API)."
+        "OpenAI-compatible endpoint — NVIDIA API Catalog "
+        "(https://integrate.api.nvidia.com/v1), a local Ollama server "
+        "(http://localhost:11434/v1), or RunPod vLLM."
     )
 
 
@@ -175,9 +177,14 @@ def _act(action: str, args: dict | None = None, reason: str = "") -> str:
 class OpenAICompatBackend:
     """Backend for any OpenAI-compatible /chat/completions endpoint.
 
-    Covers RunPod vLLM deployments and NVIDIA API Catalog, which both speak the
-    OpenAI schema. Network libraries are imported lazily so this module stays
-    importable with no dependencies installed.
+    Covers RunPod vLLM deployments, the NVIDIA API Catalog
+    (https://integrate.api.nvidia.com/v1, free tier available), and fully
+    local servers like Ollama (http://localhost:11434/v1) or LM Studio
+    (http://localhost:1234/v1) — all speak the same OpenAI chat schema. Local
+    servers generally ignore the Authorization header, so any non-empty
+    EC_LLM_API_KEY placeholder (e.g. "ollama") works. Network libraries are
+    imported lazily so this module stays importable with no dependencies
+    installed.
     """
 
     def __init__(
@@ -187,12 +194,16 @@ class OpenAICompatBackend:
         api_key: str | None = None,
         temperature: float = 0.8,
         max_tokens: int = 300,
+        timeout: float = 60.0,
     ) -> None:
         self.base_url = (base_url or os.environ.get("EC_LLM_BASE_URL", "")).rstrip("/")
         self.model = model or os.environ.get("EC_LLM_MODEL", "")
         self.api_key = api_key or os.environ.get("EC_LLM_API_KEY", "")
         self.temperature = temperature
         self.max_tokens = max_tokens
+        # Generous default: local CPU inference (Ollama/LM Studio) can be much
+        # slower per call than a hosted API.
+        self.timeout = timeout
 
     def complete(self, prompt: str) -> str:
         import urllib.request  # stdlib, avoids a hard dependency
@@ -213,6 +224,6 @@ class OpenAICompatBackend:
                 "Authorization": f"Bearer {self.api_key}",
             },
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
             body = json.loads(resp.read())
         return body["choices"][0]["message"]["content"]

@@ -12,9 +12,23 @@ the latest render snapshot over HTTP. Three clients consume the same
     python -m server.viz_server              # then open http://localhost:8000
     python -m server.viz_server --port 9000 --tick-ms 300 --agents 12
 
-    # Drive agents with a real LLM instead of the heuristic baseline:
+    # Drive agents with a real LLM instead of the heuristic baseline. Pick one:
+
+    # (a) Anthropic
     export EC_LLM_API_KEY=<anthropic-key>          # or ANTHROPIC_API_KEY
     python -m server.viz_server --llm --agents 4 --tick-ms 2000
+
+    # (b) NVIDIA API Catalog (free tier) — build.nvidia.com
+    export EC_LLM_BASE_URL=https://integrate.api.nvidia.com/v1
+    export EC_LLM_MODEL=meta/llama-3.1-8b-instruct   # or any model you enabled
+    export EC_LLM_API_KEY=<nvidia-key>
+    python -m server.viz_server --llm --agents 4 --tick-ms 2000
+
+    # (c) Fully local (Ollama) — no cloud, no key needed beyond a placeholder
+    export EC_LLM_BASE_URL=http://localhost:11434/v1
+    export EC_LLM_MODEL=llama3.1
+    export EC_LLM_API_KEY=ollama
+    python -m server.viz_server --llm --agents 4 --tick-ms 3000
 
 The server itself uses only the Python standard library (no framework, no
 extra deps beyond an LLM API call when ``--llm`` is used).
