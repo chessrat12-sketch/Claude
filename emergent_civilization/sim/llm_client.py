@@ -173,8 +173,10 @@ def pick_backend_from_env(*, allow_mock: bool = True) -> LLMBackend:
     raise RuntimeError(
         "No LLM credentials found. Set EC_LLM_API_KEY (or ANTHROPIC_API_KEY) to use "
         "Anthropic, or EC_LLM_BASE_URL (+ EC_LLM_MODEL, EC_LLM_API_KEY) for an "
-        "OpenAI-compatible endpoint — NVIDIA API Catalog "
-        "(https://integrate.api.nvidia.com/v1), Google Gemini "
+        "OpenAI-compatible endpoint — free options with no card required: Groq "
+        "(https://api.groq.com/openai/v1), OpenRouter "
+        "(https://openrouter.ai/api/v1, use a ':free'-tagged model), NVIDIA "
+        "API Catalog (https://integrate.api.nvidia.com/v1); or Google Gemini "
         "(https://generativelanguage.googleapis.com/v1beta/openai), xAI Grok "
         "(https://api.x.ai/v1), a local Ollama server "
         "(http://localhost:11434/v1), or RunPod vLLM."
@@ -213,14 +215,16 @@ class OpenAICompatBackend:
     Covers RunPod vLLM deployments, the NVIDIA API Catalog
     (https://integrate.api.nvidia.com/v1, free tier available), Google Gemini's
     OpenAI-compatible endpoint (https://generativelanguage.googleapis.com/v1beta/openai,
-    free tier via a Google AI Studio key — no phone verification required,
-    unlike some other providers), xAI Grok (https://api.x.ai/v1, console.x.ai),
-    and fully local servers like Ollama (http://localhost:11434/v1) or LM
-    Studio (http://localhost:1234/v1) — all speak the same OpenAI chat schema.
-    Local servers generally ignore the Authorization header, so any non-empty
-    EC_LLM_API_KEY placeholder (e.g. "ollama") works. Network libraries are
-    imported lazily so this module stays importable with no dependencies
-    installed.
+    free tier via a Google AI Studio key), xAI Grok (https://api.x.ai/v1,
+    console.x.ai — needs billing/credits), Groq (https://api.groq.com/openai/v1,
+    console.groq.com — free tier, no card required), OpenRouter
+    (https://openrouter.ai/api/v1, openrouter.ai — ":free"-tagged models need
+    no card), and fully local servers like Ollama (http://localhost:11434/v1)
+    or LM Studio (http://localhost:1234/v1) — all speak the same OpenAI chat
+    schema. Local servers generally ignore the Authorization header, so any
+    non-empty EC_LLM_API_KEY placeholder (e.g. "ollama") works. Network
+    libraries are imported lazily so this module stays importable with no
+    dependencies installed.
     """
 
     def __init__(

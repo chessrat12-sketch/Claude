@@ -30,13 +30,25 @@ the latest render snapshot over HTTP. Three clients consume the same
     export EC_LLM_API_KEY=<google-ai-studio-key>
     python -m server.viz_server --llm --agents 4 --tick-ms 2000
 
-    # (d) xAI Grok (OpenAI-compatible endpoint) — console.x.ai
+    # (d) xAI Grok (OpenAI-compatible endpoint) — console.x.ai (needs billing/credits)
     export EC_LLM_BASE_URL=https://api.x.ai/v1
     export EC_LLM_MODEL=grok-2-latest        # check console.x.ai for the current name
     export EC_LLM_API_KEY=<xai-key>
     python -m server.viz_server --llm --agents 4 --tick-ms 2000
 
-    # (e) Fully local (Ollama) — no cloud, no key needed beyond a placeholder
+    # (e) Groq (free tier, no card required) — console.groq.com
+    export EC_LLM_BASE_URL=https://api.groq.com/openai/v1
+    export EC_LLM_MODEL=llama-3.1-8b-instant  # see console.groq.com/docs/models
+    export EC_LLM_API_KEY=<groq-key>
+    python -m server.viz_server --llm --agents 4 --tick-ms 2000
+
+    # (f) OpenRouter (":free"-tagged models, no card required) — openrouter.ai
+    export EC_LLM_BASE_URL=https://openrouter.ai/api/v1
+    export EC_LLM_MODEL=meta-llama/llama-3.1-8b-instruct:free  # see openrouter.ai/models?max_price=0
+    export EC_LLM_API_KEY=<openrouter-key>
+    python -m server.viz_server --llm --agents 4 --tick-ms 2000
+
+    # (g) Fully local (Ollama) — no cloud, no key needed beyond a placeholder
     export EC_LLM_BASE_URL=http://localhost:11434/v1
     export EC_LLM_MODEL=llama3.1
     export EC_LLM_API_KEY=ollama
