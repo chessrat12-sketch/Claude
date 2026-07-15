@@ -24,7 +24,13 @@ the latest render snapshot over HTTP. Three clients consume the same
     export EC_LLM_API_KEY=<nvidia-key>
     python -m server.viz_server --llm --agents 4 --tick-ms 2000
 
-    # (c) Fully local (Ollama) — no cloud, no key needed beyond a placeholder
+    # (c) Google Gemini (free tier, OpenAI-compatible endpoint) — aistudio.google.com/apikey
+    export EC_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+    export EC_LLM_MODEL=gemini-2.0-flash
+    export EC_LLM_API_KEY=<google-ai-studio-key>
+    python -m server.viz_server --llm --agents 4 --tick-ms 2000
+
+    # (d) Fully local (Ollama) — no cloud, no key needed beyond a placeholder
     export EC_LLM_BASE_URL=http://localhost:11434/v1
     export EC_LLM_MODEL=llama3.1
     export EC_LLM_API_KEY=ollama
