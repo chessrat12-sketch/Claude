@@ -13,6 +13,12 @@ import json
 import os
 from typing import Protocol
 
+# Python's default urllib User-Agent ("Python-urllib/3.x") is a well-known
+# automation signature that some providers' edge WAFs (e.g. Cloudflare) block
+# outright — surfacing as an opaque "error code: 1010" with no mention of the
+# real API at all. Sending a normal-looking one avoids that false positive.
+_USER_AGENT = "EmergentCivilization/1.0 (+https://github.com; research-sim-client)"
+
 
 class LLMBackend(Protocol):
     def complete(self, prompt: str) -> str: ...
@@ -138,6 +144,7 @@ class AnthropicBackend:
                 "content-type": "application/json",
                 "x-api-key": self.api_key,
                 "anthropic-version": "2023-06-01",
+                "User-Agent": _USER_AGENT,
             },
         )
         try:
@@ -264,6 +271,7 @@ class OpenAICompatBackend:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.api_key}",
+                "User-Agent": _USER_AGENT,
             },
         )
         try:
