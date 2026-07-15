@@ -49,27 +49,31 @@ python -m examples.run_v01_survival
 python tests/test_survival.py               # 15개 (또는: pytest tests/)
 ```
 
-실제 LLM 연결:
+실제 LLM 연결 — **가장 쉬운 방법**: `.env.example` 을 `.env` 로 복사하고 값
+채우기(한 번만). 이후 실행할 때마다 `set`/`export` 다시 안 쳐도 자동으로
+로드된다(`.env` 는 `.gitignore` 처리돼 있어 커밋되지 않음).
+
 ```bash
-# OpenAI 호환(RunPod vLLM / NVIDIA API)
-export EC_LLM_BASE_URL=... EC_LLM_MODEL=... EC_LLM_API_KEY=...
-# 또는 Anthropic
-export EC_LLM_API_KEY=<anthropic-key> EC_LLM_MODEL=claude-haiku-4-5-20251001
+cp .env.example .env    # Windows: copy .env.example .env
+# .env 파일을 열어 원하는 공급자 블록의 주석(#)을 풀고 실제 키를 채운다.
+py -m server.viz_server --llm --agents 4 --tick-ms 2000
+```
+
+매번 새로 지정하고 싶다면 세션 환경변수도 여전히 동작한다(둘 다 있으면
+환경변수가 우선):
+```bash
+export EC_LLM_BASE_URL=... EC_LLM_MODEL=... EC_LLM_API_KEY=...   # OpenAI 호환
+export EC_LLM_API_KEY=<anthropic-key> EC_LLM_MODEL=claude-haiku-4-5-20251001  # Anthropic
 python -m examples.run_llm_agents
 ```
 
+지원 공급자(전부 `EC_LLM_BASE_URL`/`EC_LLM_MODEL`/`EC_LLM_API_KEY` 로 설정,
+자세한 값은 `.env.example` 참조): Groq·OpenRouter(카드 불필요) · NVIDIA API
+Catalog · Google Gemini · xAI Grok · 로컬 Ollama/LM Studio · RunPod vLLM ·
+Anthropic.
+
 Unity 3D 클라이언트 설정은 `unity/README_UNITY.md` (5분), 시각화 구조는
 `docs/08_visualization.md` 참조.
-
-### LLM 에이전트로 실행하려면
-
-`OpenAICompatBackend` 를 `LLMPolicy` 에 연결한다(RunPod vLLM / NVIDIA API 호환):
-
-```bash
-export EC_LLM_BASE_URL="https://<your-endpoint>/v1"
-export EC_LLM_MODEL="<model-name>"
-export EC_LLM_API_KEY="<key>"
-```
 
 ```python
 from sim import Simulation, LLMPolicy, make_scattered_world

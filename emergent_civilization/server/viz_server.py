@@ -12,7 +12,13 @@ the latest render snapshot over HTTP. Three clients consume the same
     python -m server.viz_server              # then open http://localhost:8000
     python -m server.viz_server --port 9000 --tick-ms 300 --agents 12
 
-    # Drive agents with a real LLM instead of the heuristic baseline. Pick one:
+    # Drive agents with a real LLM instead of the heuristic baseline.
+    #
+    # Easiest: copy .env.example to .env in this directory, fill in your real
+    # values once, and every future run picks them up automatically — no more
+    # retyping `set`/`export` each session. See .env.example for the format.
+    #
+    # Or set them for just this session (any of these providers work). Pick one:
 
     # (a) Anthropic
     export EC_LLM_API_KEY=<anthropic-key>          # or ANTHROPIC_API_KEY
@@ -69,8 +75,15 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from sim import Agent, HeuristicPolicy, LLMPolicy, Personality, Simulation, make_scattered_world
+from sim.envfile import load_env_file
 from sim.llm_client import pick_backend_from_env
 from sim.snapshot import world_snapshot
+
+# Load .env (if present) before anything reads EC_LLM_* from the environment.
+# Checks the current directory first, then this file's project root, so it
+# works whether you run from emergent_civilization/ or elsewhere.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_loaded_env = load_env_file(os.getcwd(), _PROJECT_ROOT)
 
 NAMES = [
     "Aria", "Boaz", "Cira", "Doran", "Esme", "Finn", "Gwen", "Hodr", "Ivo",
@@ -211,6 +224,9 @@ def main() -> None:
              "or EC_LLM_BASE_URL) instead of the heuristic baseline",
     )
     args = parser.parse_args()
+
+    if _loaded_env:
+        print(f"[env] loaded {_loaded_env}")
 
     if args.llm and args.tick_ms < 1500:
         print(f"[llm] note: {args.tick_ms}ms/tick is tight for API latency — each tick "

@@ -17,12 +17,17 @@ Backend selection (first that applies):
 
 from __future__ import annotations
 
+import os
 import random
 
 from sim import Agent, LLMPolicy, Personality, Simulation, make_scattered_world
+from sim.envfile import load_env_file
 from sim.llm_client import pick_backend_from_env
 
 NAMES = ["Aria", "Boaz", "Cira", "Doran", "Esme", "Finn"]
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_env_file(os.getcwd(), _PROJECT_ROOT)
 
 
 def main() -> None:
