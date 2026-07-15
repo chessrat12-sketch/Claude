@@ -77,8 +77,9 @@ python -m examples.run_llm_agents
 Catalog · Google Gemini · xAI Grok · 로컬 Ollama/LM Studio · RunPod vLLM ·
 Anthropic.
 
-Unity 3D 클라이언트 설정은 `unity/README_UNITY.md` (5분), 시각화 구조는
-`docs/08_visualization.md` 참조.
+Unity 3D 클라이언트 설정은 `unity/README_UNITY.md` (5분), Unreal Engine
+클라이언트(C++, 컴파일 미검증 — 문제 생기면 알려주면 바로 수정)는
+`unreal/README_UNREAL.md`, 시각화 구조는 `docs/08_visualization.md` 참조.
 
 ```python
 from sim import Simulation, LLMPolicy, make_scattered_world
@@ -115,6 +116,9 @@ emergent_civilization/
 ├── unity/                   # Unity 3D 클라이언트 (C# + 설정 가이드)
 │   ├── Scripts/*.cs
 │   └── README_UNITY.md
+├── unreal/                  # Unreal Engine 클라이언트 (C++ + 설정 가이드)
+│   ├── Source/*.h,*.cpp
+│   └── README_UNREAL.md
 ├── examples/
 │   ├── run_v01_survival.py  # 오프라인 베이스라인 데모(생태계 포함)
 │   └── run_llm_agents.py    # LLM 에이전트 추론(reason) 데모
