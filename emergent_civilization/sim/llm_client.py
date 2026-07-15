@@ -18,6 +18,31 @@ class LLMBackend(Protocol):
     def complete(self, prompt: str) -> str: ...
 
 
+def _sanitize_header_value(name: str, value: str) -> str:
+    """Strip incidental whitespace and fail loudly on non-Latin-1 content.
+
+    HTTP header values must be Latin-1. A stray character picked up while
+    copy-pasting a key (a smart quote, a zero-width space, a BOM) produces a
+    cryptic ``'latin-1' codec can't encode characters`` error deep inside
+    urllib with no indication of which value or character caused it. Catching
+    it here — at backend construction time, before any request is made —
+    turns that into one clear, immediate error instead of the same confusing
+    failure repeating every tick for every agent.
+    """
+    cleaned = value.strip()
+    try:
+        cleaned.encode("latin-1")
+    except UnicodeEncodeError as e:
+        raise ValueError(
+            f"{name} contains a character that can't go in an HTTP header "
+            f"(often an invisible character picked up while copy-pasting, or "
+            f"leftover placeholder text). Re-copy the value fresh from the "
+            f"source and paste it in on its own, with nothing else attached. "
+            f"Value seen (repr, so hidden characters are visible): {cleaned!r}"
+        ) from e
+    return cleaned
+
+
 class EchoBackend:
     """Offline stand-in that returns a valid but trivial action.
 
@@ -86,8 +111,9 @@ class AnthropicBackend:
         temperature: float = 0.8,
     ) -> None:
         self.model = model or os.environ.get("EC_LLM_MODEL", "claude-haiku-4-5-20251001")
-        self.api_key = api_key or os.environ.get("EC_LLM_API_KEY") \
+        raw_key = api_key or os.environ.get("EC_LLM_API_KEY") \
             or os.environ.get("ANTHROPIC_API_KEY", "")
+        self.api_key = _sanitize_header_value("EC_LLM_API_KEY/ANTHROPIC_API_KEY", raw_key)
         self.base_url = (base_url or os.environ.get("ANTHROPIC_BASE_URL",
                          "https://api.anthropic.com")).rstrip("/")
         self.max_tokens = max_tokens
@@ -206,7 +232,8 @@ class OpenAICompatBackend:
     ) -> None:
         self.base_url = (base_url or os.environ.get("EC_LLM_BASE_URL", "")).rstrip("/")
         self.model = model or os.environ.get("EC_LLM_MODEL", "")
-        self.api_key = api_key or os.environ.get("EC_LLM_API_KEY", "")
+        raw_key = api_key or os.environ.get("EC_LLM_API_KEY", "")
+        self.api_key = _sanitize_header_value("EC_LLM_API_KEY", raw_key)
         self.temperature = temperature
         self.max_tokens = max_tokens
         # Generous default: local CPU inference (Ollama/LM Studio) can be much

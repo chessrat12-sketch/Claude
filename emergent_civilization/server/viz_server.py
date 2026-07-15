@@ -201,7 +201,7 @@ def main() -> None:
 
     try:
         live = LiveWorld(args.agents, args.size, args.tick_ms, args.seed, use_llm=args.llm)
-    except RuntimeError as e:
+    except (RuntimeError, ValueError) as e:
         raise SystemExit(f"error: {e}")
 
     threading.Thread(target=live.run_loop, daemon=True).start()
