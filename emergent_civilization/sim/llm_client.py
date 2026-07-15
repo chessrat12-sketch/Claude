@@ -118,6 +118,34 @@ class AnthropicBackend:
         return body["content"][0]["text"]
 
 
+def pick_backend_from_env(*, allow_mock: bool = True) -> LLMBackend:
+    """Choose a backend from environment variables, in this order:
+
+    1. ``EC_LLM_BASE_URL`` set      -> OpenAICompatBackend (RunPod vLLM / NVIDIA API)
+    2. ``EC_LLM_API_KEY`` or ``ANTHROPIC_API_KEY`` set -> AnthropicBackend
+    3. otherwise, if ``allow_mock`` -> MockReasoningBackend (offline, no network)
+
+    Raises ``RuntimeError`` if no credentials are found and ``allow_mock`` is
+    False — used by callers (like the live viz server) where silently falling
+    back to a fake model would be misleading.
+    """
+    if os.environ.get("EC_LLM_BASE_URL"):
+        print(f"[llm] backend: OpenAICompatBackend ({os.environ['EC_LLM_BASE_URL']})")
+        return OpenAICompatBackend()
+    if os.environ.get("EC_LLM_API_KEY") or os.environ.get("ANTHROPIC_API_KEY"):
+        model = os.environ.get("EC_LLM_MODEL", "claude-haiku-4-5-20251001")
+        print(f"[llm] backend: AnthropicBackend (model={model})")
+        return AnthropicBackend()
+    if allow_mock:
+        print("[llm] backend: MockReasoningBackend (offline — set EC_LLM_* for a real model)")
+        return MockReasoningBackend()
+    raise RuntimeError(
+        "No LLM credentials found. Set EC_LLM_API_KEY (or ANTHROPIC_API_KEY) to use "
+        "Anthropic, or EC_LLM_BASE_URL (+ EC_LLM_MODEL, EC_LLM_API_KEY) for an "
+        "OpenAI-compatible endpoint (RunPod vLLM / NVIDIA API)."
+    )
+
+
 # -- helpers for the mock backend -----------------------------------------
 def _extract_observation(prompt: str) -> dict:
     """Pull the observation JSON block back out of a built prompt."""

@@ -12,9 +12,12 @@ the latest render snapshot over HTTP. Three clients consume the same
     python -m server.viz_server              # then open http://localhost:8000
     python -m server.viz_server --port 9000 --tick-ms 300 --agents 12
 
+    # Drive agents with a real LLM instead of the heuristic baseline:
+    export EC_LLM_API_KEY=<anthropic-key>          # or ANTHROPIC_API_KEY
+    python -m server.viz_server --llm --agents 4 --tick-ms 2000
+
 The server itself uses only the Python standard library (no framework, no
-extra deps). Swap the policy factory for ``LLMPolicy`` to visualise real LLM
-agents.
+extra deps beyond an LLM API call when ``--llm`` is used).
 """
 
 from __future__ import annotations
@@ -27,7 +30,8 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from sim import Agent, HeuristicPolicy, Personality, Simulation, make_scattered_world
+from sim import Agent, HeuristicPolicy, LLMPolicy, Personality, Simulation, make_scattered_world
+from sim.llm_client import pick_backend_from_env
 from sim.snapshot import world_snapshot
 
 NAMES = [
@@ -43,7 +47,9 @@ VENDOR_DIR = os.path.join(VIEWER_DIR, "vendor")            # vendored three.js (
 class LiveWorld:
     """Owns the simulation and the latest snapshot behind a lock."""
 
-    def __init__(self, n_agents: int, size: int, tick_ms: int, seed: int) -> None:
+    def __init__(
+        self, n_agents: int, size: int, tick_ms: int, seed: int, use_llm: bool = False
+    ) -> None:
         self.tick_ms = tick_ms
         rng = random.Random(seed)
         world = make_scattered_world(width=size, height=size, density=0.20, seed=seed)
@@ -60,11 +66,14 @@ class LiveWorld:
                     ),
                 )
             )
-        self.sim = Simulation(
-            world, agents,
-            policy_factory=lambda a: HeuristicPolicy(a.personality),
-            seed=seed,
-        )
+        if use_llm:
+            # Fails loudly if no credentials are set — a live LLM run with no
+            # key would otherwise be a confusing silent fallback.
+            backend = pick_backend_from_env(allow_mock=False)
+            policy_factory = lambda a: LLMPolicy(a, backend)  # noqa: E731
+        else:
+            policy_factory = lambda a: HeuristicPolicy(a.personality)  # noqa: E731
+        self.sim = Simulation(world, agents, policy_factory=policy_factory, seed=seed)
         self._lock = threading.Lock()
         self._snapshot = self._build_snapshot()
         self._running = True
@@ -158,14 +167,29 @@ def main() -> None:
     parser.add_argument("--size", type=int, default=14)
     parser.add_argument("--tick-ms", type=int, default=400, help="ms between ticks")
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument(
+        "--llm", action="store_true",
+        help="drive agents with a real LLM (needs EC_LLM_API_KEY/ANTHROPIC_API_KEY "
+             "or EC_LLM_BASE_URL) instead of the heuristic baseline",
+    )
     args = parser.parse_args()
 
-    live = LiveWorld(args.agents, args.size, args.tick_ms, args.seed)
+    if args.llm and args.tick_ms < 1500:
+        print(f"[llm] note: {args.tick_ms}ms/tick is tight for API latency — each tick "
+              f"calls the model once per agent, one after another. Consider --tick-ms 2000+ "
+              f"and a small --agents count to keep it responsive and cheap.")
+
+    try:
+        live = LiveWorld(args.agents, args.size, args.tick_ms, args.seed, use_llm=args.llm)
+    except RuntimeError as e:
+        raise SystemExit(f"error: {e}")
+
     threading.Thread(target=live.run_loop, daemon=True).start()
 
     server = ThreadingHTTPServer(("0.0.0.0", args.port), make_handler(live))
     print(f"Emergent Civilization village live at http://localhost:{args.port}")
-    print(f"  {args.agents} agents · {args.size}x{args.size} world · {args.tick_ms}ms/tick")
+    mode = "LLM agents" if args.llm else "heuristic baseline"
+    print(f"  {args.agents} agents ({mode}) · {args.size}x{args.size} world · {args.tick_ms}ms/tick")
     print("  3D view: /  (Three.js, orbit camera)   |   Isometric: /iso")
     print("  GET /state for the raw snapshot (Unity/other clients). Ctrl-C to stop.")
     try:
