@@ -137,8 +137,9 @@ class AnthropicBackend:
                 "messages": [{"role": "user", "content": prompt}],
             }
         ).encode()
+        url = f"{self.base_url}/v1/messages"
         req = urllib.request.Request(
-            f"{self.base_url}/v1/messages",
+            url,
             data=payload,
             headers={
                 "content-type": "application/json",
@@ -152,7 +153,7 @@ class AnthropicBackend:
                 body = json.loads(resp.read())
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"HTTP {e.code} from {self.base_url}: {detail}") from e
+            raise RuntimeError(f"HTTP {e.code} from {url}: {detail or '(empty response body)'}") from e
         return body["content"][0]["text"]
 
 
@@ -274,8 +275,9 @@ class OpenAICompatBackend:
                 "max_tokens": self.max_tokens,
             }
         ).encode()
+        url = f"{self.base_url}/chat/completions"
         req = urllib.request.Request(
-            f"{self.base_url}/chat/completions",
+            url,
             data=payload,
             headers={
                 "Content-Type": "application/json",
@@ -288,7 +290,10 @@ class OpenAICompatBackend:
                 body = json.loads(resp.read())
         except urllib.error.HTTPError as e:
             # Surface the provider's actual error text (e.g. "invalid API key",
-            # "model not found") instead of a bare "HTTP Error 400".
+            # "model not found") instead of a bare "HTTP Error 400". Report the
+            # full URL actually requested (not just base_url) — a 404 here
+            # almost always means the path is wrong, so seeing the exact path
+            # that failed is the whole point of this message.
             detail = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"HTTP {e.code} from {self.base_url}: {detail}") from e
+            raise RuntimeError(f"HTTP {e.code} from {url}: {detail or '(empty response body)'}") from e
         return body["choices"][0]["message"]["content"]
