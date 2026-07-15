@@ -224,9 +224,13 @@ class LLMPolicy:
             f"Traits — greed {p.greed:.1f}, sociability {p.sociability:.1f}, "
             f"caution {p.caution:.1f}, curiosity {p.curiosity:.1f}."
         )
+        # Compact (no indent) JSON — cuts prompt size by roughly a third versus
+        # pretty-printing, which matters a lot on free-tier token-per-minute
+        # limits (e.g. Groq's free tier) when several agents call every tick.
+        obs_json = json.dumps(obs, ensure_ascii=False, separators=(",", ":"))
         return (
             f"{SYSTEM_INSTRUCTIONS}\n\n{persona}\n\n"
-            f"Current observation:\n{json.dumps(obs, ensure_ascii=False, indent=2)}\n\n"
+            f"Current observation:\n{obs_json}\n\n"
             "Your action:"
         )
 

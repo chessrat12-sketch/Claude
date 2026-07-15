@@ -240,7 +240,7 @@ class OpenAICompatBackend:
         model: str | None = None,
         api_key: str | None = None,
         temperature: float = 0.8,
-        max_tokens: int = 300,
+        max_tokens: int = 150,
         timeout: float = 60.0,
     ) -> None:
         self.base_url = (base_url or os.environ.get("EC_LLM_BASE_URL", "")).rstrip("/")

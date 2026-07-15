@@ -43,16 +43,20 @@ the latest render snapshot over HTTP. Three clients consume the same
     python -m server.viz_server --llm --agents 4 --tick-ms 2000
 
     # (e) Groq (free tier, no card required) — console.groq.com
+    # Free-tier token-per-minute limits are tight (e.g. 6000 TPM on
+    # llama-3.1-8b-instant); use a slower tick or fewer agents, or you'll see
+    # "[llm] ...: HTTP 429 ... rate_limit_exceeded" and that agent idles.
     export EC_LLM_BASE_URL=https://api.groq.com/openai/v1
     export EC_LLM_MODEL=llama-3.1-8b-instant  # see console.groq.com/docs/models
     export EC_LLM_API_KEY=<groq-key>
-    python -m server.viz_server --llm --agents 4 --tick-ms 2000
+    python -m server.viz_server --llm --agents 2 --tick-ms 15000
 
     # (f) OpenRouter (":free"-tagged models, no card required) — openrouter.ai
+    # Free models are also rate-limited; start slow, same as Groq above.
     export EC_LLM_BASE_URL=https://openrouter.ai/api/v1
     export EC_LLM_MODEL=meta-llama/llama-3.1-8b-instruct:free  # see openrouter.ai/models?max_price=0
     export EC_LLM_API_KEY=<openrouter-key>
-    python -m server.viz_server --llm --agents 4 --tick-ms 2000
+    python -m server.viz_server --llm --agents 2 --tick-ms 15000
 
     # (g) Fully local (Ollama) — no cloud, no key needed beyond a placeholder
     export EC_LLM_BASE_URL=http://localhost:11434/v1
@@ -232,6 +236,12 @@ def main() -> None:
         print(f"[llm] note: {args.tick_ms}ms/tick is tight for API latency — each tick "
               f"calls the model once per agent, one after another. Consider --tick-ms 2000+ "
               f"and a small --agents count to keep it responsive and cheap.")
+    if args.llm and args.tick_ms < 10000 and args.agents > 2:
+        print(f"[llm] note: free-tier providers (Groq, OpenRouter, ...) often cap tokens "
+              f"per minute (e.g. 6000 TPM) — {args.agents} agents at {args.tick_ms}ms/tick can "
+              f"exceed that quickly and you'll see 'rate_limit_exceeded' in the log (that "
+              f"agent just idles that tick, it's not a crash). If you see it a lot, try "
+              f"--agents 2 --tick-ms 15000 or slower.")
 
     try:
         live = LiveWorld(args.agents, args.size, args.tick_ms, args.seed, use_llm=args.llm)
